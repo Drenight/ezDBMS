@@ -1,28 +1,41 @@
+import os
+import time
+import dill
+import threading
+from BTrees.OOBTree import OOBTree
+
+BTreePersisFileName = "zipBTree.btree"
+snapShotInterVal = 10
+
+def getstate(self):
+    return self.__dict__
+
+def setstate(self, state):
+    self.__dict__ = state
+
 def load_BTree():
-    return {}
+    if not os.path.isfile(BTreePersisFileName):
+        return OOBTree()
+    else:
+        with open(BTreePersisFileName, 'rb') as file:
+            return dill.load(file)
+
+def snapShotBuilder(BTree):
+    while True:
+        with open(BTreePersisFileName, 'wb') as file:
+            dill.dump(BTree, file)
+        time.sleep(snapShotInterVal)
 
 def main():
-    demo_dict_as_btree()
-
-def demo_dynamic_class():
-    # Define class attributes and methods
-    class_attrs = {
-        'x': 1,
-        'y': 2,
-        'name': 'MyClass',
-        'add': lambda self: self.x + self.y
-    }
-
-    # Create the class using the type() function
-    MyClass = type('MyClass', (object,), class_attrs)
-
-    # Create an instance of the class and access the attribute
-    obj = MyClass()
-    print(obj.name)  # Output: "MyClass"
-
-
-def demo_dict_as_btree():
     BTree = load_BTree()
+
+    th1 = threading.Thread(target=snapShotBuilder, args=(BTree,))
+    th1.start()
+
+    print(BTree)
+    print(list(BTree.keys()))
+
+    exit()
 
     class_attrs_1 = {
         "name": "Alice",
@@ -34,17 +47,22 @@ def demo_dict_as_btree():
     }
     
     class1 = type("ins", (object,), class_attrs_1)
+    class1.__getstate__ = getstate
+    class1.__setstate__ = setstate
+
     class2 = type("ins", (object,), class_attrs_2)
+    class2.__getstate__ = getstate
+    class2.__setstate__ = setstate
 
     obj1 = class1()
     obj2 = class2()
+    
+    BTree.update({obj1.name:obj1})
+    BTree.update({obj2.name:obj2})
 
-    BTree.setdefault(obj1.mark, obj1)
-    BTree.setdefault(obj2.mark, obj2)
-
-    #print(BTree)                {97: <__main__.ins object at 0x100a1a110>, 81: <__main__.ins object at 0x100a1a150>}
-    #print(BTree[97].name)       Alice
-
-    print(BTree.keys())
+    print(list(BTree.keys()))
+    del BTree[obj1.name]
+    print(list(BTree.keys()))
+    print(BTree["Bob"].mark)
 
 main()
