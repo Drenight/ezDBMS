@@ -4,13 +4,39 @@ import dill
 import threading
 from BTrees.OOBTree import OOBTree
 
+import metaModifier
+
+print(metaModifier.create_table("id2salary",("id","int"),("salary","int")))
+
+BTreeDict={}    #(relation, attribute) -> BTreeWrapper
 BTreePersisFileName = "zipBTree.btree"
 snapShotInterVal = 10
+
+class BTreeWrapper:
+    def __init__(self):
+        self.btree = OOBTree()
+        self.lock = threading.Lock()
+
+    def __getitem__(self, key):
+        with self.lock:
+            return self.btree[key]
+
+    def __setitem__(self, key, value):
+        with self.lock:
+            self.btree[key] = value
+
+    def __delitem__(self, key):
+        with self.lock:
+            del self.btree[key]
+    
+    def __rangequery__(self, key1, key2):
+        pass
 
 BTree = OOBTree()
 BTreeLock = threading.Lock()
 
 def reloadRelationMeta(meta_file):
+    meta_file = metaModifier.metaPrefix + meta_file
     with open(meta_file) as f:
         meta_info = f.read().strip().split('\n')
     meta_dict = {}
@@ -41,7 +67,9 @@ def engine():
     while True:
         op, *cmd = input().split()
         BTreeLock.acquire()
-        if int(op) == 0: # 0 Eve 37
+        if int(op) == 0:
+            pass
+        elif int(op) == 1: # 1 Eve 37
             mp = {}
             meta_file = 'meta_mark.meta'
             meta_dict = reloadRelationMeta(meta_file)
@@ -64,9 +92,10 @@ def engine():
                 BTree.update({cmd[0]: mp})
                 print(mp)
                 print(BTree[cmd[0]])
-        elif int(op) == 1:
+        elif int(op) == 2:
             print(BTree[cmd[0]]["mark"])
             print(BTree[cmd[0]]["name"])
+        
         BTreeLock.release()
 
 def main():
