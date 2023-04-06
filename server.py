@@ -10,30 +10,14 @@ snapShotInterVal = 10
 BTree = OOBTree()
 BTreeLock = threading.Lock()
 
-def initTest():
-    global BTree, BTreeLock
-    class_attrs_1 = {
-        "name": "Alice",
-        "mark": 97
-    }
-    class_attrs_2 = {
-        "name": "Bob",
-        "mark": 81
-    }
-    
-    class1 = type("ins", (object,), class_attrs_1)
-    class2 = type("ins", (object,), class_attrs_2)
-
-    obj1 = class1()
-    obj2 = class2()
-    
-    BTree.update({obj1.name:obj1})
-    BTree.update({obj2.name:obj2})
-
-    #print(list(BTree.keys()))
-    #del BTree[obj1.name]
-    #print(list(BTree.keys()))
-    #print(BTree["Bob"].mark)
+def reloadRelationMeta(meta_file):
+    with open(meta_file) as f:
+        meta_info = f.read().strip().split('\n')
+    meta_dict = {}
+    for info in meta_info:
+        name, data_type = info.split()
+        meta_dict[name] = data_type
+    return meta_dict
 
 def load_BTree():
     if not os.path.isfile(BTreePersisFileName):
@@ -48,25 +32,48 @@ def snapshotBuilder():
         BTreeLock.acquire()
         with open(BTreePersisFileName, 'wb') as file:
             dill.dump(BTree, file)
+        #print("snapshot built")
         BTreeLock.release()
         time.sleep(snapShotInterVal)
 
 def engine():
     global BTree, BTreeLock
     while True:
-        id = input()
+        op, *cmd = input().split()
         BTreeLock.acquire()
-        print(BTree[id])
+        if int(op) == 0: # 0 Eve 37
+            mp = {}
+            meta_file = 'meta_mark.meta'
+            meta_dict = reloadRelationMeta(meta_file)
+            for i, name in enumerate(meta_dict):
+                if i >= len(cmd):
+                    print('Error: Too few attributes for', name)
+                    break
+                data_type = meta_dict[name]
+                attr_value = cmd[i]
+                try:
+                    if data_type == 'int':
+                        attr_value = int(attr_value)
+                    elif data_type == 'str':
+                        attr_value = str(attr_value)
+                    mp[name] = attr_value
+                except ValueError:
+                    print('Error: Invalid type for', name)
+                    break
+            else:
+                BTree.update({cmd[0]: mp})
+                print(mp)
+                print(BTree[cmd[0]])
+        elif int(op) == 1:
+            print(BTree[cmd[0]]["mark"])
+            print(BTree[cmd[0]]["name"])
         BTreeLock.release()
-
 
 def main():
     global BTree, BTreeLock
     BTree = load_BTree()
 
-    #initTest()
-    #print(list(BTree.keys()))
-    #print(BTree["Alice"])
+    print(list(BTree.keys()))
 
     th_SnapshotBuilder = threading.Thread(target=snapshotBuilder)
     th_MainEngine = threading.Thread(target=engine)
