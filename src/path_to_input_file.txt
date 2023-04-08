@@ -1,0 +1,1 @@
+SELECT * FROM table1 join table2 WHERE field1 = 'value1' group by name;
