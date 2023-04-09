@@ -58,3 +58,17 @@ class BTreeWrapper:
     
     def __rangequery__(self, key1, key2):
         pass
+
+# 创建一个空的 B-Tree，并将节点类型指定为 set 类型
+btree = OOBTree()
+btree[2] = set()
+
+# 在 B-Tree 中插入元素
+
+# 查找某个键对应的节点
+node = btree.get(2)
+btree[2].add(3)
+btree[2].add(7)
+
+# 输出节点内容
+print(node)  # 输出 {4, 5, 6}
