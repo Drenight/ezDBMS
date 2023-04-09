@@ -5,7 +5,9 @@ import dill
 import uuid
 #import BTrees
 import pickle
+import collections
 from BTrees.OOBTree import OOBTree
+
 import metaModifier
 
 def ex():
@@ -13,9 +15,9 @@ def ex():
 
 testSQL = "SELECT * FROM table1 WHERE field1 = 'value1'"
 
-baseDBDict = {}   #[relation][uuid:173]  -> {id:7, salary:1000}
-BTreeDict = {}    #[relation][attribute] -> BTree, each key map to a set, set stores uuids, uuid points to the row
-metaDict = {}     #[relation]            -> {id:int, name:str}
+baseDBDict = {}                         # [relation][uuid:173]  -> {id:7, salary:1000}
+BTreeDict = {}                          # [relation][attribute] -> BTree, each key map to a set, set stores uuids, uuid points to the row
+metaDict = {}                           # [relation]            -> {id:int, name:str}
 
 snapShotInterVal = 1
 
@@ -23,7 +25,10 @@ def base_lst2mp(relation, lst):
     mp = {}
     cnt = 0
     for k in metaDict[relation]:
-        mp.setdefault(k, lst[cnt])
+        if metaDict[relation][k] == "str":
+            mp.setdefault(k, str(lst[cnt]))
+        else:
+            mp.setdefault(k, int(lst[cnt]))
         cnt += 1
     return mp
 
@@ -179,25 +184,19 @@ def write_row(relationName, cmd):
         baseDBDict[relationName][btree_value] = inner_mp
         print(baseDBDict)
 
-        # TODO: update index
-        #for index in BTreeDict[relationName]:
-        #    wp = BTreeDict[relationName][index]
-        #    with wp.lock:
-        #        wp.update(mp[index], cmd)
-    
-        #BTree = BTreeDict[(relationName)]
-        #BTree.update({cmd[0]: mp})
-        #print(mp)
-        #print(BTree[cmd[0]])
+        # update index
+        for index in BTreeDict[relationName]:
+            btree = BTreeDict[relationName][index]
+            k = inner_mp[index]
+            if k not in btree.keys():
+                btree.setdefault(k, set())
+            btree[k].add(btree_value)
 
 # ptr id 909
 # check if exists indexing(hash/btree), else O(n) scan
 def query_equal(relationName, cmd):
     found = False
     attr = cmd[0]
-    #if attr not in metaDict[relationName].keys():           #can be solved centralized, plus relationName...
-    #    print("No attr in " + str(relationName) + ".")
-    #    return
     ret_list = []
     if attr in BTreeDict[relationName].keys():
         # TODO: test
@@ -219,6 +218,29 @@ def query_equal(relationName, cmd):
     if not found:
         print("Nothing found.")
 
+def query_range(relationName, cmd):
+    mn = int(cmd[1])
+    mx = int(cmd[2])
+    k = cmd[0]
+    found = False
+    if k in BTreeDict[relationName].keys():
+        btree = BTreeDict[relationName][k]
+        print("range query by indexing...")
+
+        print(list(btree.keys()))
+        print(mn, mx)
+        for key, value in btree.items(min=mn, max=mx):
+            found = True
+            print(key, value)
+    else:
+        for uu in baseDBDict[relationName]:
+            row_mp = baseDBDict[relationName][uu]
+            if row_mp[k]>=mn and row_mp[k]<=mx:
+                found = True
+                print(row_mp)
+    if not found:
+        print("Nothing found.")
+
 def create_index(relationName, cmd):
     indexAttr = cmd[0]
     if relationName in BTreeDict.keys() and indexAttr in BTreeDict[relationName].keys():
@@ -236,29 +258,40 @@ def create_index(relationName, cmd):
         btree[k].add(uu)
         print(BTreeDict[relationName][indexAttr][baseDBDict[relationName][uu][indexAttr]])
 
+def del_row(relationName, cmd):
+    uu = cmd[1]
+    row_mp = baseDBDict[relationName][uu]
+    for k in BTreeDict[relationName]:
+        BTreeDict[relationName][k][row_mp[uu][k]].remove(uu)
+    del baseDBDict[relationName][uu]
+
 def engine():
     load_snapshot()
     operatorCounter = 0
     while True:
         operatorCounter += 1
-
         # start work
         op = input()
-        if int(op) == 0:      # metaModifier.create_table("id2salary",("id","int"),("salary","int")
+        if int(op) == 0:      # 0 test_table id int name str
             cmd = input().split()
             create_table(cmd[0], cmd[1:])
-        elif int(op) == 1:    # 1 name2salary Eve 37
+        elif int(op) == 1:    # 1 name2salary Eve 37, write a row
             cmd = input().split()
-            relationName = cmd[0]
-            cmd = cmd[1:]
-            write_row(relationName, cmd)
-        elif int(op) == 2:    # 2 ptr id 909
+            write_row(cmd[0], cmd[1:])
+        elif int(op) == 2:    # 2 ptr id 909, equal query
             cmd = input().split()
             query_equal(cmd[0], cmd[1:])
-        elif int(op) == 3:    # 3 ptr id, create index
+        elif int(op) == 3:    # 3 ptr id 700 1000, range query
+            cmd = input().split()
+            query_range(cmd[0], cmd[1:])
+        elif int(op) == 4:    # 4 ptr id, create index
             cmd = input().split()
             create_index(cmd[0], cmd[1:])
-
+        elif int(op) == 5:    # 5 ptr uuid, del a row
+            cmd = input().split()
+            del_row(cmd[0], cmd[1:])
+        
+        
         # persist
         if operatorCounter % snapShotInterVal == 0:
             persist_snapshot()
