@@ -3,7 +3,8 @@ import glob
 import csv
 import dill
 import uuid
-import BTrees
+#import BTrees
+import pickle
 from BTrees.OOBTree import OOBTree
 import metaModifier
 
@@ -13,7 +14,7 @@ def ex():
 testSQL = "SELECT * FROM table1 WHERE field1 = 'value1'"
 
 baseDBDict = {}   #[relation][uuid:173]  -> {id:7, salary:1000}
-BTreeDict = {}    #[relation][attribute] -> BTree each key map to a tuple, tuple stores uuids, uuid points to the row
+BTreeDict = {}    #[relation][attribute] -> BTree, each key map to a set, set stores uuids, uuid points to the row
 metaDict = {}     #[relation]            -> {id:int, name:str}
 
 snapShotInterVal = 1
@@ -46,19 +47,29 @@ def persist_snapshot():
                 row = [uu] + lst#baseDBDict[relation][uu]
                 writer.writerow(row)
 
+    # persist btree
+    for relation in BTreeDict:
+        for attr in BTreeDict[relation]:
+            btree = BTreeDict[relation][attr]
+            file_name = getBTreeFileName(relation, attr)
+            dir_name = os.path.dirname(file_name)
+            os.makedirs(dir_name, exist_ok=True)
+            with open(file_name, 'wb') as f:
+                pickle.dump(btree, f)
+
 def load_snapshot():
     # load meta relation
-    meta_path = '../meta/'
+    meta_path = 'meta/'
     meta_files = glob.glob(os.path.join(meta_path, '*.meta'))
     file_names = [os.path.basename(file) for file in meta_files]
     for f in file_names:
         relation = f[:-5]
         attr_dict = loadRelationMeta(metaModifier.metaPrefix + f)
         metaDict.setdefault(relation, attr_dict)
-    print(metaDict)
+    print("Successfully load metaDict", str(metaDict))
 
     # load baseDB
-    baseDB_path = '../baseDB/'
+    baseDB_path = 'baseDB/'
     baseDB_files = glob.glob(os.path.join(baseDB_path, '*.csv'))
     file_names = [os.path.basename(file) for file in baseDB_files]
     for fn in file_names:
@@ -71,15 +82,32 @@ def load_snapshot():
                 lst = row[1:]
                 inner_mp = base_lst2mp(relation, lst)
                 baseDBDict[relation].setdefault(uuid, inner_mp)
-    print(baseDBDict)
+    print("Successfully load baseDBDict", str(baseDBDict))
 
+    # load btree
+    btree_path = 'btree/'
+    for dir_path, sub_dirs, files in os.walk(btree_path):
+        relation = dir_path[6:]
+        if relation == "": # root, nothing
+            continue
+        BTreeDict.setdefault(relation, {})
+        for file_name in files:
+            file_path = os.path.join(dir_path, file_name)
+            #print(dir_path, sub_dirs, files, file_path)
+            attr = file_name[:-6]
+            with open(file_path, 'rb') as f:
+                btree = pickle.load(f)
+                BTreeDict[relation].setdefault(attr, btree)
+                #print(BTreeDict[relation][attr])
+    print("Successfully load BTreeDict", str(BTreeDict))
+    #print(BTreeDict["ptr"]["id"]["909"])
+            
 def getMetaFileName(relationName):
-    return "../meta/"+relationName+".meta"
+    return "meta/"+relationName+".meta"
 def getBaseDBFileName(relationName):
-    return "../baseDB/"+relationName+".csv"
+    return "baseDB/"+relationName+".csv"
 def getBTreeFileName(relationName, attributeName):
-    return "../btree/"+relationName+"|"+attributeName+".btree"
-
+    return "btree/"+relationName+"/"+attributeName+".btree"
 
 def loadRelationMeta(meta_file):
     with open(meta_file) as f:
@@ -171,21 +199,42 @@ def query_equal(relationName, cmd):
     #    print("No attr in " + str(relationName) + ".")
     #    return
     ret_list = []
-    if attr in BTreeDict.keys():
+    if attr in BTreeDict[relationName].keys():
         # TODO: test
         btree = BTreeDict[relationName][attr]
-        uu_tuple = btree[cmd[1]]
-        for uu in uu_tuple:
-            ret_list.append(baseDBDict[uu])
+        print(relationName, attr)
+        uu_set = btree[cmd[1]]
+        print(uu_set)
+        for uu in uu_set:
+            print(uu, relationName)
+            ret_list.append(baseDBDict[relationName][uu])
+        print("By index, found: "+str(ret_list))
         return ret_list
     else:
         for uu in baseDBDict[relationName]:
             row_mp = baseDBDict[relationName][uu]
             if row_mp[attr] == cmd[1]:
-                print("Found:" + str(row_mp))
+                print("By linear scaning, Found: " + str(row_mp))
                 found = True
     if not found:
         print("Nothing found.")
+
+def create_index(relationName, cmd):
+    indexAttr = cmd[0]
+    if relationName in BTreeDict.keys() and indexAttr in BTreeDict[relationName].keys():
+        print("Index exists.")
+        return
+    if relationName not in BTreeDict.keys():
+        BTreeDict.setdefault(relationName, {})
+    if indexAttr not in BTreeDict[relationName].keys():
+        BTreeDict[relationName].setdefault(indexAttr, OOBTree())
+    for uu in baseDBDict[relationName]:
+        btree = BTreeDict[relationName][indexAttr]
+        k = baseDBDict[relationName][uu][indexAttr]
+        if k not in btree.keys():
+            btree[k] = set()
+        btree[k].add(uu)
+        print(BTreeDict[relationName][indexAttr][baseDBDict[relationName][uu][indexAttr]])
 
 def engine():
     load_snapshot()
@@ -205,9 +254,10 @@ def engine():
             write_row(relationName, cmd)
         elif int(op) == 2:    # 2 ptr id 909
             cmd = input().split()
-            query_equal(cmd[0],cmd[1:])
-        elif int(op) == 3:    # create index
-            pass
+            query_equal(cmd[0], cmd[1:])
+        elif int(op) == 3:    # 3 ptr id, create index
+            cmd = input().split()
+            create_index(cmd[0], cmd[1:])
 
         # persist
         if operatorCounter % snapShotInterVal == 0:
