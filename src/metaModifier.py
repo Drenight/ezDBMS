@@ -1,6 +1,6 @@
 import os
 
-metaPrefix = "meta/"
+metaPrefix = "../meta/"
 fileExists = -1
 # MOON (name, str) (mark, int)
 
@@ -14,12 +14,13 @@ fileExists = -1
 def getDir(relationName):
     return metaPrefix + relationName + ".meta"
 
-def create_table(relationName, *attributes):
+def create_table(relationName, attributes):
     #print(relationName, attributes)
     if os.path.exists(getDir(relationName)):
         return "Relation already exists!"
     with open(getDir(relationName), "w") as f:
         for attribute in attributes:
+            print(attribute)
             name, datatype = attribute
             f.write(f"{name} {datatype}\n")
         return 0
