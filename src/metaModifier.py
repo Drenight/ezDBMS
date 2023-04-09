@@ -1,6 +1,6 @@
 import os
 
-metaPrefix = "../meta/"
+metaPrefix = "meta/"
 fileExists = -1
 # MOON (name, str) (mark, int)
 
