@@ -178,7 +178,7 @@ def write_row(relationName, cmd):
             break
     else:
         # update base csv
-        btree_value = uuid.uuid4()
+        btree_value = str(uuid.uuid4())
         baseDBDict[relationName].setdefault(btree_value,{})
         inner_mp = base_lst2mp(relationName, cmd)
         baseDBDict[relationName][btree_value] = inner_mp
@@ -197,12 +197,19 @@ def write_row(relationName, cmd):
 def query_equal(relationName, cmd):
     found = False
     attr = cmd[0]
+    if metaDict[relationName][attr] == "int":
+        val = int(cmd[1])
+    else:
+        val = str(cmd[1])
+
     ret_list = []
     if attr in BTreeDict[relationName].keys():
         # TODO: test
         btree = BTreeDict[relationName][attr]
         print(relationName, attr)
-        uu_set = btree[cmd[1]]
+
+        #print(list(btree.keys()))
+        uu_set = btree[val]
         print(uu_set)
         for uu in uu_set:
             print(uu, relationName)
@@ -212,7 +219,7 @@ def query_equal(relationName, cmd):
     else:
         for uu in baseDBDict[relationName]:
             row_mp = baseDBDict[relationName][uu]
-            if row_mp[attr] == cmd[1]:
+            if row_mp[attr] == val:
                 print("By linear scaning, Found: " + str(row_mp))
                 found = True
     if not found:
@@ -259,10 +266,12 @@ def create_index(relationName, cmd):
         print(BTreeDict[relationName][indexAttr][baseDBDict[relationName][uu][indexAttr]])
 
 def del_row(relationName, cmd):
-    uu = cmd[1]
+    uu = cmd[0]
     row_mp = baseDBDict[relationName][uu]
     for k in BTreeDict[relationName]:
-        BTreeDict[relationName][k][row_mp[uu][k]].remove(uu)
+        BTreeDict[relationName][k][row_mp[k]].remove(uu)
+        if len(BTreeDict[relationName][k][row_mp[k]]) == 0:
+            del BTreeDict[relationName][k][row_mp[k]]
     del baseDBDict[relationName][uu]
 
 def engine():
@@ -275,7 +284,7 @@ def engine():
         if int(op) == 0:      # 0 test_table id int name str
             cmd = input().split()
             create_table(cmd[0], cmd[1:])
-        elif int(op) == 1:    # 1 name2salary Eve 37, write a row
+        elif int(op) == 1:    # 1 ptr 909 Alice, write a row
             cmd = input().split()
             write_row(cmd[0], cmd[1:])
         elif int(op) == 2:    # 2 ptr id 909, equal query
