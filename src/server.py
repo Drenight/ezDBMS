@@ -8,14 +8,13 @@ import pickle
 import parser_Create
 from BTrees.OOBTree import OOBTree
 
-import recycle.metaModifier as metaModifier
-
 def ex():
     exit()
 
 baseDBDict = {}                         # [relation][uuid:173]  -> {id:7, salary:1000}
 BTreeDict = {}                          # [relation][attribute] -> BTree, each key map to a set, set stores uuids, uuid points to the row
 metaDict = {}                           # [relation]            -> {id:int, name:str}
+constraintDict = {}                     # [relation]            -> {primary: attr, foreign:{attr:id, rela2:, rela_attr:}}
 
 snapShotInterVal = 1
 
@@ -59,6 +58,9 @@ def persist_snapshot():
             os.makedirs(dir_name, exist_ok=True)
             with open(file_name, 'wb') as f:
                 pickle.dump(btree, f)
+
+    #persist constraint
+    # TODO
 
 def load_snapshot():
     # load meta relation
@@ -105,12 +107,17 @@ def load_snapshot():
     print("Successfully load BTreeDict", str(BTreeDict))
     #print(BTreeDict["ptr"]["id"]["909"])
             
+    #load constraint
+    # TODO
+    
 def getMetaFileName(relationName):
     return "meta/"+relationName+".meta"
 def getBaseDBFileName(relationName):
     return "baseDB/"+relationName+".csv"
 def getBTreeFileName(relationName, attributeName):
     return "btree/"+relationName+"/"+attributeName+".btree"
+def getConstraintFileName(relationName):
+    return "constraint/"+relationName+".constrain"
 
 def loadRelationMeta(meta_file):
     with open(meta_file) as f:
@@ -272,16 +279,35 @@ def del_row(relationName, cmd):
             del BTreeDict[relationName][k][row_mp[k]]
     del baseDBDict[relationName][uu]
 
+def create_primary(relationName, attr):
+    print(relationName, attr)
+
+def create_foreign(relationName, attr, rela2, attr2):
+    print(relationName, attr, rela2, attr2)
+
+def read_sql():
+    sql = ""
+    while True:
+        line = input()
+        if line.endswith(";"):
+            sql += line
+            break
+        else:
+            sql += line + " "
+    return sql
+
 def engine():
     load_snapshot()
     operatorCounter = 0
     while True:
         operatorCounter += 1
         # start work
-        op = input()
+        op = 99
+        #op = input()
 
-        if int(op) == -1:
-            sql = input()
+        sql = read_sql()
+
+        if sql.upper().find("CREATE TABLE") != -1:
             virtual_plan = parser_Create.virtual_plan_create(sql)
             print(virtual_plan.__dict__)
             lst = []
@@ -289,6 +315,13 @@ def engine():
                 lst.append(pr['name'])
                 lst.append(pr['type'])
             create_table(virtual_plan.table_name, lst)
+            if virtual_plan.primary_key:
+                create_primary(virtual_plan.table_name, virtual_plan.primary_key)                       #promise, single attr
+            if virtual_plan.foreign_key:
+                create_foreign(
+                virtual_plan.table_name, virtual_plan.foreign_key["local_columns"][0], 
+                virtual_plan.foreign_key["table"], virtual_plan.foreign_key["foreign_columns"][0]
+                )      #promise, single attr
 
         if int(op) == 0:      # 0 test_table id int name str
             cmd = input().split()
