@@ -8,7 +8,7 @@ import pickle
 import parser_Create
 from BTrees.OOBTree import OOBTree
 
-import metaModifier
+import recycle.metaModifier as metaModifier
 
 def ex():
     exit()
@@ -67,7 +67,7 @@ def load_snapshot():
     file_names = [os.path.basename(file) for file in meta_files]
     for f in file_names:
         relation = f[:-5]
-        attr_dict = loadRelationMeta(metaModifier.metaPrefix + f)
+        attr_dict = loadRelationMeta("meta/" + f)
         metaDict.setdefault(relation, attr_dict)
     print("Successfully load metaDict", str(metaDict))
 
