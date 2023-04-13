@@ -5,15 +5,13 @@ import dill
 import uuid
 #import BTrees
 import pickle
-import collections
+import parser_Create
 from BTrees.OOBTree import OOBTree
 
 import metaModifier
 
 def ex():
     exit()
-
-testSQL = "SELECT * FROM table1 WHERE field1 = 'value1'"
 
 baseDBDict = {}                         # [relation][uuid:173]  -> {id:7, salary:1000}
 BTreeDict = {}                          # [relation][attribute] -> BTree, each key map to a set, set stores uuids, uuid points to the row
@@ -281,6 +279,17 @@ def engine():
         operatorCounter += 1
         # start work
         op = input()
+
+        if int(op) == -1:
+            sql = input()
+            virtual_plan = parser_Create.virtual_plan_create(sql)
+            print(virtual_plan.__dict__)
+            lst = []
+            for pr in virtual_plan.columns:
+                lst.append(pr['name'])
+                lst.append(pr['type'])
+            create_table(virtual_plan.table_name, lst)
+
         if int(op) == 0:      # 0 test_table id int name str
             cmd = input().split()
             create_table(cmd[0], cmd[1:])
