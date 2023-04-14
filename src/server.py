@@ -4,9 +4,10 @@ import csv
 import dill
 import uuid
 import logging
-#import BTrees
 import pickle
+# my parsers
 import parser_CreateTable
+import parser_Insert
 from BTrees.OOBTree import OOBTree
 
 ############################### Core Mem Data Structure & magic number config #############
@@ -15,7 +16,7 @@ BTreeDict = {}                          # [relation][attribute] -> BTree, each k
 metaDict = {}                           # [relation]            -> {id:int, name:str}
 constraintDict = {}                     # [relation]            -> {primary: attr, foreign:{attr:id, rela2:, rela_attr:}}
 
-snapShotInterVal = 2
+snapShotInterVal = 1
 tmpSQLLog = []
 
 ############################### dev tools, for debug and log ###############################
@@ -203,6 +204,7 @@ def create_table(relationName, cmd):
     metaDict.setdefault(relationName, mp)
     #metaModifier.create_table(relationName, tuList)
 
+# TODO 主键外键约束，底层模块做
 def write_row(relationName, cmd):
     if relationName not in baseDBDict.keys():
         #load_BaseDB(relationName)
@@ -210,12 +212,13 @@ def write_row(relationName, cmd):
         baseDBDict.setdefault(relationName, {})
 
     mp = {}
+    
     meta_dict = metaDict[relationName]
     logging.debug(meta_dict)
-    #print(meta_dict)
+
     for i, k in enumerate(meta_dict.keys()):
         if i >= len(cmd):
-            raiseErr('Error: Too few attributes for', k)
+            raiseErr('Error: Too few attributes for' + str(k))
         data_type = meta_dict[k]
         attr_value = cmd[i]
         try:
@@ -225,16 +228,16 @@ def write_row(relationName, cmd):
                 attr_value = str(attr_value)
             mp[k] = attr_value
         except ValueError:
-            raiseErr('Error: Invalid type for', k)
+            raiseErr('Error: Invalid type for' + str(k))
     else:
         # check primary key 
-        if 'primary' in constraintDict[relationName]:
-            pk = constraintDict[relationName]['primary']
-            lst = query_equal(relationName,[pk, mp[pk],])
-            if len(lst) != 0:
-                raise PrimaryKeyError('Error: Primary key duplicate', mp[pk])
+        if relationName in constraintDict:
+            if 'primary' in constraintDict[relationName]:
+                pk = constraintDict[relationName]['primary']
+                lst = query_equal(relationName,[pk, mp[pk],])
+                if len(lst) != 0:
+                    raise PrimaryKeyError('Error: Primary key duplicate' + str(mp[pk]))
         # check foreign key
-
         # update base csv
         btree_value = str(uuid.uuid4())
         baseDBDict[relationName].setdefault(btree_value,{})
@@ -243,13 +246,13 @@ def write_row(relationName, cmd):
         logging.debug(baseDBDict)
 
         # update index
-        # if relationName not in BTreeDict.
-        for index in BTreeDict[relationName]:
-            btree = BTreeDict[relationName][index]
-            k = inner_mp[index]
-            if k not in btree.keys():
-                btree.setdefault(k, set())
-            btree[k].add(btree_value)
+        if relationName in BTreeDict:
+            for index in BTreeDict[relationName]:
+                btree = BTreeDict[relationName][index]
+                k = inner_mp[index]
+                if k not in btree.keys():
+                    btree.setdefault(k, set())
+                btree[k].add(btree_value)
 
 # ptr id 909
 # check if exists indexing(hash/btree), else O(n) scan
@@ -396,6 +399,17 @@ def mem_exec(sql):
     elif sql.upper().find("DROP TABLE") != -1:
         pass
 
+    elif sql.upper().find("INSERT INTO") != -1:
+        virtual_plan = parser_Insert.virtual_plan_create(sql)
+        logging.debug(virtual_plan.__dict__)    # {'table_name': 'students', 'columnsKey': ['id', 'name', 'gender', 'age', 'score'], 'columnsValue': [1, 'Alice', 'F', 18, 95], 'asName': 'qq'}
+        op_list = []
+        if len(virtual_plan.columnsKey) != len(virtual_plan.columnsValue):
+            raiseErr("kv len not equal")
+        for i in range(len(virtual_plan.columnsKey)):
+            #op_list.append(virtual_plan.columnsKey[i])
+            op_list.append(virtual_plan.columnsValue[i])
+        write_row(virtual_plan.table_name, op_list)
+
     # basic demo
     if int(op) == 0:      # 0 test_table id int name str
         cmd = input().split()
@@ -445,7 +459,7 @@ def engine():
         try:
             mem_exec(sql)
         except Exception as e:  # Capture any exception, raise runnable error like primary/foreign here
-            err_logger.error(f"sql runtime error: {e}")
+            err_logger.error(f"sql runtime error: {type(e)}: {e}")
             #print("sql runtime error:", e)
             print("Start cleaning dirty cache, rollback to commit previous sql...")
             dirty_cache_rollback_and_commit()
