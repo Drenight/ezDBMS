@@ -11,12 +11,19 @@ from BTrees.OOBTree import OOBTree
 def ex():
     exit()
 
+# Core Mem Data Structure
 baseDBDict = {}                         # [relation][uuid:173]  -> {id:7, salary:1000}
 BTreeDict = {}                          # [relation][attribute] -> BTree, each key map to a set, set stores uuids, uuid points to the row
 metaDict = {}                           # [relation]            -> {id:int, name:str}
 constraintDict = {}                     # [relation]            -> {primary: attr, foreign:{attr:id, rela2:, rela_attr:}}
 
-snapShotInterVal = 1
+snapShotInterVal = 2
+tmpSQLLog = []
+
+class PrimaryKeyError(Exception):
+    pass
+class ForeignKeyError(Exception):
+    pass
 
 def base_lst2mp(relation, lst):
     mp = {}
@@ -60,7 +67,10 @@ def persist_snapshot():
                 pickle.dump(btree, f)
 
     #persist constraint
-    # TODO
+    for relation in constraintDict:
+        with open(getConstraintFileName(relation), 'wb') as f:
+            print(constraintDict[relation])
+            pickle.dump(constraintDict[relation], f)
 
 def load_snapshot():
     # load meta relation
@@ -108,7 +118,15 @@ def load_snapshot():
     #print(BTreeDict["ptr"]["id"]["909"])
             
     #load constraint
-    # TODO
+    constraint_path = 'constraint/'
+    constraint_files = glob.glob(os.path.join(constraint_path, '*.constrain'))
+    file_names = [os.path.basename(file) for file in constraint_files]
+    for fn in file_names:
+        relation = fn[:-10]
+        with open(getConstraintFileName(relation), 'rb') as file:
+            mp = pickle.load(file)
+            constraintDict.setdefault(relation, mp)
+    print("Successfully load constraintDict", str(constraintDict))
     
 def getMetaFileName(relationName):
     return "meta/"+relationName+".meta"
@@ -143,7 +161,7 @@ def load_BaseDB(relationName):
             mp = dill.load(file)
             print(mp)
             baseDBDict.setdefault(relationName, mp)
-
+             
 def create_table(relationName, cmd):
     #print(metaModifier.create_table("name2salary",[("name","str"),("salary","int")),...])
     #tuList = []
@@ -161,7 +179,9 @@ def create_table(relationName, cmd):
 
 def write_row(relationName, cmd):
     if relationName not in baseDBDict.keys():
-        load_BaseDB(relationName)
+        #load_BaseDB(relationName)
+        # TODO 不确定
+        baseDBDict.setdefault(relationName, {})
 
     mp = {}
     meta_dict = metaDict[relationName]
@@ -182,6 +202,14 @@ def write_row(relationName, cmd):
             print('Error: Invalid type for', k)
             break
     else:
+        # check primary key 
+        if 'primary' in constraintDict[relationName]:
+            pk = constraintDict[relationName]['primary']
+            lst = query_equal(relationName,[pk, mp[pk],])
+            if len(lst) != 0:
+                raise PrimaryKeyError('Error: Primary key duplicate', mp[pk])
+        # check foreign key
+
         # update base csv
         btree_value = str(uuid.uuid4())
         baseDBDict[relationName].setdefault(btree_value,{})
@@ -190,6 +218,7 @@ def write_row(relationName, cmd):
         print(baseDBDict)
 
         # update index
+        # if relationName not in BTreeDict.
         for index in BTreeDict[relationName]:
             btree = BTreeDict[relationName][index]
             k = inner_mp[index]
@@ -208,7 +237,7 @@ def query_equal(relationName, cmd):
         val = str(cmd[1])
 
     ret_list = []
-    if attr in BTreeDict[relationName].keys():
+    if relationName in BTreeDict.keys() and  attr in BTreeDict[relationName].keys():
         # TODO: test
         btree = BTreeDict[relationName][attr]
         print(relationName, attr)
@@ -220,15 +249,16 @@ def query_equal(relationName, cmd):
             print(uu, relationName)
             ret_list.append(baseDBDict[relationName][uu])
         print("By index, found: "+str(ret_list))
-        return ret_list
     else:
         for uu in baseDBDict[relationName]:
             row_mp = baseDBDict[relationName][uu]
             if row_mp[attr] == val:
                 print("By linear scaning, Found: " + str(row_mp))
                 found = True
+                ret_list.append(baseDBDict[relationName][uu])
     if not found:
         print("Nothing found.")
+    return ret_list
 
 def query_range(relationName, cmd):
     mn = int(cmd[1])
@@ -279,11 +309,30 @@ def del_row(relationName, cmd):
             del BTreeDict[relationName][k][row_mp[k]]
     del baseDBDict[relationName][uu]
 
+# TODO 把鲁棒测试集中在执行前？不然下面爆了上面还要回滚
+# 好多要测的啊
+# 至少要支持主键和外键的限制
 def create_primary(relationName, attr):
     print(relationName, attr)
+    if relationName not in constraintDict.keys():
+        constraintDict.setdefault(relationName, {})
+    if "primary" in constraintDict[relationName].keys():
+        raise PrimaryKeyError(f"{relationName} already has a primary key.")
+    else:
+        constraintDict[relationName].setdefault("primary", attr)
 
 def create_foreign(relationName, attr, rela2, attr2):
     print(relationName, attr, rela2, attr2)
+    if attr2 not in metaDict[rela2].keys():
+        pass
+    if metaDict[rela2][attr2] != metaDict[relationName][attr]:
+        pass
+    if "foreign" in constraintDict[relationName].keys():
+        raise ForeignKeyError(f"{relationName} already has a foreign key.")
+    else:
+        constraintDict[relationName].setdefault("foreign", {})
+        constraintDict[relationName]["foreign"].setdefault("rela2", rela2)
+        constraintDict[relationName]["foreign"].setdefault("attr2", attr2)
 
 def read_sql():
     sql = ""
@@ -296,56 +345,87 @@ def read_sql():
             sql += line + " "
     return sql
 
+def mem_exec(sql):
+    op = 999
+    # create table 
+    # CREATE TABLE TTT(ID INT PRIMARY KEY);
+    if sql.upper().find("CREATE TABLE") != -1:
+        virtual_plan = parser_Create.virtual_plan_create(sql)
+        print(virtual_plan.__dict__)
+        lst = []
+        for pr in virtual_plan.columns:
+            lst.append(pr['name'])
+            lst.append(pr['type'])
+        create_table(virtual_plan.table_name, lst)
+        if virtual_plan.primary_key:
+            create_primary(virtual_plan.table_name, virtual_plan.primary_key)                       #promise, single attr
+            # create_index(virtual_plan.table_name, virtual_plan.primary_key)
+            # 只需要注册就行，不需要调用creat_index，因为baseDB没东西
+            BTreeDict.setdefault(virtual_plan.table_name, OOBTree())
+        if virtual_plan.foreign_key:
+            try:
+                create_foreign(
+                virtual_plan.table_name, virtual_plan.foreign_key["local_columns"][0], 
+                virtual_plan.foreign_key["table"], virtual_plan.foreign_key["foreign_columns"][0]
+                )        #promise, single attr
+            except ForeignKeyError as e:
+                print(f"Error: {e}")
+        
+    elif sql.upper().find("DROP TABLE") != -1:
+        pass
+
+    # basic demo
+    if int(op) == 0:      # 0 test_table id int name str
+        cmd = input().split()
+        create_table(cmd[0], cmd[1:])
+    elif int(op) == 1:    # 1 ptr 909 Alice, write a row
+        cmd = input().split()
+        write_row(cmd[0], cmd[1:])
+    elif int(op) == 2:    # 2 ptr id 909, equal query
+        cmd = input().split()
+        query_equal(cmd[0], cmd[1:])
+    elif int(op) == 3:    # 3 ptr id 700 1000, range query
+        cmd = input().split()
+        query_range(cmd[0], cmd[1:])
+    elif int(op) == 4:    # 4 ptr id, create index
+        cmd = input().split()
+        create_index(cmd[0], cmd[1:])
+    elif int(op) == 5:    # 5 ptr uuid, del a row
+        cmd = input().split()
+        del_row(cmd[0], cmd[1:])
+
+def dirty_cache_rollback_and_commit():
+    metaDict.clear()
+    baseDBDict.clear()
+    BTreeDict.clear()
+    constraintDict.clear()
+    load_snapshot()
+    for query in tmpSQLLog:
+        mem_exec(query)
+    tmpSQLLog.clear()
+    persist_snapshot()
+
 def engine():
     load_snapshot()
+    #print("Got meta,", metaDict)
     operatorCounter = 0
     while True:
         operatorCounter += 1
         # start work
-        op = 99
-        #op = input()
-
+        op = 999
         sql = read_sql()
-
-        if sql.upper().find("CREATE TABLE") != -1:
-            virtual_plan = parser_Create.virtual_plan_create(sql)
-            print(virtual_plan.__dict__)
-            lst = []
-            for pr in virtual_plan.columns:
-                lst.append(pr['name'])
-                lst.append(pr['type'])
-            create_table(virtual_plan.table_name, lst)
-            if virtual_plan.primary_key:
-                create_primary(virtual_plan.table_name, virtual_plan.primary_key)                       #promise, single attr
-            if virtual_plan.foreign_key:
-                create_foreign(
-                virtual_plan.table_name, virtual_plan.foreign_key["local_columns"][0], 
-                virtual_plan.foreign_key["table"], virtual_plan.foreign_key["foreign_columns"][0]
-                )      #promise, single attr
-
-        if int(op) == 0:      # 0 test_table id int name str
-            cmd = input().split()
-            create_table(cmd[0], cmd[1:])
-        elif int(op) == 1:    # 1 ptr 909 Alice, write a row
-            cmd = input().split()
-            write_row(cmd[0], cmd[1:])
-        elif int(op) == 2:    # 2 ptr id 909, equal query
-            cmd = input().split()
-            query_equal(cmd[0], cmd[1:])
-        elif int(op) == 3:    # 3 ptr id 700 1000, range query
-            cmd = input().split()
-            query_range(cmd[0], cmd[1:])
-        elif int(op) == 4:    # 4 ptr id, create index
-            cmd = input().split()
-            create_index(cmd[0], cmd[1:])
-        elif int(op) == 5:    # 5 ptr uuid, del a row
-            cmd = input().split()
-            del_row(cmd[0], cmd[1:])
-        
-        
+        try:
+            mem_exec(sql)
+        except Exception as e:  # Capture any exception, raise runnable error like primary/foreign here
+            print("sql runtime error:", e)
+            print("Start cleaning dirty cache, rollback to commit previous sql...")
+            dirty_cache_rollback_and_commit()
+            continue # skip regular persist
         # persist
         if operatorCounter % snapShotInterVal == 0:
+            #global baseDBDict, BTreeDict, metaDict, constraintDict
             persist_snapshot()
+            print("persist done")
 
 def main():
     engine()
