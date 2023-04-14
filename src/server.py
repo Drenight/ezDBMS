@@ -346,6 +346,7 @@ def mem_exec(sql):
     op = 999
     # create table 
     # CREATE TABLE TTT(ID INT PRIMARY KEY);
+    # TODO? 根据语法树根节点，不采用字符串查询，不搞
     if sql.upper().find("CREATE TABLE") != -1:
         virtual_plan = parser_Create.virtual_plan_create(sql)
         print(virtual_plan.__dict__)
@@ -405,11 +406,13 @@ def dirty_cache_rollback_and_commit():
 def engine():
     load_snapshot()
     #print("Got meta,", metaDict)
-    operatorCounter = 0
+    sqlCounter = 0
     while True:
-        operatorCounter += 1
+        # TODO:
+        # ctrl+c之类关机，把tmpSQLLog里的东西写进磁盘，再关机
+        # 或者，commit的东西，汇报commit
+
         # start work
-        op = 999
         sql = read_sql()
         try:
             mem_exec(sql)
@@ -418,8 +421,9 @@ def engine():
             print("Start cleaning dirty cache, rollback to commit previous sql...")
             dirty_cache_rollback_and_commit()
             continue # skip regular persist
+        sqlCounter += 1
         # persist
-        if operatorCounter % snapShotInterVal == 0:
+        if sqlCounter % snapShotInterVal == 0:
             #global baseDBDict, BTreeDict, metaDict, constraintDict
             persist_snapshot()
             print("persist done")
