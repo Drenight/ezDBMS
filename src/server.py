@@ -6,9 +6,19 @@ import uuid
 import logging
 #import BTrees
 import pickle
-import parser_Create
+import parser_CreateTable
 from BTrees.OOBTree import OOBTree
 
+############################### Core Mem Data Structure & magic number config #############
+baseDBDict = {}                         # [relation][uuid:173]  -> {id:7, salary:1000}
+BTreeDict = {}                          # [relation][attribute] -> BTree, each key map to a set, set stores uuids, uuid points to the row
+metaDict = {}                           # [relation]            -> {id:int, name:str}
+constraintDict = {}                     # [relation]            -> {primary: attr, foreign:{attr:id, rela2:, rela_attr:}}
+
+snapShotInterVal = 2
+tmpSQLLog = []
+
+############################### dev tools, for debug and log ###############################
 # create a formatter that prints ERROR messages in red
 class ColoredFormatter(logging.Formatter):
     def format(self, record):
@@ -34,19 +44,12 @@ def ex():
 def raiseErr(message):
     raise Exception(message)
 
-# Core Mem Data Structure
-baseDBDict = {}                         # [relation][uuid:173]  -> {id:7, salary:1000}
-BTreeDict = {}                          # [relation][attribute] -> BTree, each key map to a set, set stores uuids, uuid points to the row
-metaDict = {}                           # [relation]            -> {id:int, name:str}
-constraintDict = {}                     # [relation]            -> {primary: attr, foreign:{attr:id, rela2:, rela_attr:}}
-
-snapShotInterVal = 2
-tmpSQLLog = []
-
 class PrimaryKeyError(Exception):
     pass
 class ForeignKeyError(Exception):
     pass
+
+############################### functions to utilize core data structure ############################### 
 
 def base_lst2mp(relation, lst):
     mp = {}
@@ -372,7 +375,7 @@ def mem_exec(sql):
     # CREATE TABLE TTT(ID INT PRIMARY KEY);
     # TODO? 根据语法树根节点，不采用字符串查询，不搞
     if sql.upper().find("CREATE TABLE") != -1:
-        virtual_plan = parser_Create.virtual_plan_create(sql)
+        virtual_plan = parser_CreateTable.virtual_plan_create(sql)
         logging.debug(virtual_plan.__dict__)
         lst = []
         for pr in virtual_plan.columns:
