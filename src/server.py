@@ -309,9 +309,6 @@ def del_row(relationName, cmd):
             del BTreeDict[relationName][k][row_mp[k]]
     del baseDBDict[relationName][uu]
 
-# TODO 把鲁棒测试集中在执行前？不然下面爆了上面还要回滚
-# 好多要测的啊
-# 至少要支持主键和外键的限制
 def create_primary(relationName, attr):
     print(relationName, attr)
     if relationName not in constraintDict.keys():
