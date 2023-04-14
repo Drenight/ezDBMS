@@ -1,30 +1,35 @@
+# 复制
 from antlr4 import *
 from parser.antlr.SQLiteLexer import SQLiteLexer
 from parser.antlr.SQLiteParser import SQLiteParser
 from parser.antlr.SQLiteParserListener import SQLiteParserListener
 
-#要改的内容
-class DropPlan:
+# 英雄登场
+# 核心要改的内容
+class DeletePlan:
     def __init__(self):
+        # 这些属性，要改，根据你是什么语句，决定你要存哪些参数
         self.table_name = None
-        
-        
+        self.columns = []  # 列的信息，每一项包含列名、数据类型、是否为主键等
+        self.primary_key = None  # 主键的信息，包含主键名和包含哪些列
+        self.foreign_key = {}
 
 # 核心要改的内容
-# 修改类名为 DropListener 并继承 SQLiteParserListener
-class DropListener(SQLiteParserListener):
+class DeleteListener(SQLiteParserListener):
     def __init__(self):
-        self.plan = DropPlan()
+        self.plan = CreatePlan()
 
-    # 修改为处理 DROP TABLE 语句的方法
-    def enterDrop_stmt(self, ctx: SQLiteParser.Drop_stmtContext):
-        self.plan.table_name = ctx.any_name().getText()#ctx.table_name().getText()
-        print(self.plan.table_name)
-        return super().enterDrop_stmt(ctx)
+    # 开发的时候下面删掉
+    # enter写那些这条语句，的语法树的各个节点的enter，拿信息
+    def enterCreate_table_stmt(self, ctx:SQLiteParser.Create_table_stmtContext):
+        # 获取表名
+        self.plan.table_name = ctx.table_name().getText()
+
+    def enterTable_constraint(self, ctx: SQLiteParser.Table_constraintContext):
 
 
 # 直接复制
-def virtual_plan_drop(sql):
+def virtual_plan_create(sql):
     print(sql)
     # 创建一个输入流
     input_stream = InputStream(sql)
@@ -42,7 +47,7 @@ def virtual_plan_drop(sql):
     tree = parser.parse()
 
     # 创建一个 Listener 实例
-    listener = DropListener()
+    listener = DeleteListener()
 
     # 遍历语法树
     walker = ParseTreeWalker()
@@ -54,7 +59,7 @@ def virtual_plan_drop(sql):
 def main():
     # 要解析的 SQL 语句
     sql = """
-        DROP TABLE table_name;
+        DELETE FROM table_name WHERE condition;
     """
     ## {
     # 'table_name': 'orders', 
@@ -82,7 +87,7 @@ def main():
     tree = parser.parse()
 
     # 创建一个 Listener 实例
-    listener = DropListener()
+    listener = DeleteListener()
 
     # 遍历语法树
     walker = ParseTreeWalker()
@@ -90,5 +95,4 @@ def main():
 
     print(listener.plan.__dict__)
 
-if __name__ == '__main__':
-   main()
+main()
