@@ -97,14 +97,14 @@ def virtual_plan_create(sql):
     walker.walk(listener, tree)
     return listener.plan
 
+# CREATE TABLE TTT(ID INT PRIMARY KEY);
 def main():
     # 要解析的 SQL 语句
     sql = """
         CREATE TABLE orders (
         id INT PRIMARY KEY,
         customer_id INT,
-        order_date DATE,
-        FOREIGN KEY (customer_id) REFERENCES customers(id)
+        FOREIGN KEY (customer_id) REFERENCES ptr(id)
         );
     """
     ## {
