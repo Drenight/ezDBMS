@@ -3,13 +3,36 @@ import glob
 import csv
 import dill
 import uuid
+import logging
 #import BTrees
 import pickle
 import parser_Create
 from BTrees.OOBTree import OOBTree
 
+# create a formatter that prints ERROR messages in red
+class ColoredFormatter(logging.Formatter):
+    def format(self, record):
+        if record.levelno == logging.ERROR:
+            record.msg = '\033[31m' + record.msg + '\033[0m'
+        return super(ColoredFormatter, self).format(record)
+
+# configure the root logger to handle all log levels
+logging.basicConfig(level=logging.DEBUG)
+
+# create a console handler and set its formatter to the colored formatter
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.ERROR)
+console_handler.setFormatter(ColoredFormatter('%(levelname)s: %(message)s'))
+
+# add the console handler to the root logger
+logging.getLogger().addHandler(console_handler)
+err_logger = logging.getLogger('err_logger')
+
 def ex():
     exit()
+
+def raiseErr(message):
+    raise Exception(message)
 
 # Core Mem Data Structure
 baseDBDict = {}                         # [relation][uuid:173]  -> {id:7, salary:1000}
@@ -69,7 +92,6 @@ def persist_snapshot():
     #persist constraint
     for relation in constraintDict:
         with open(getConstraintFileName(relation), 'wb') as f:
-            print(constraintDict[relation])
             pickle.dump(constraintDict[relation], f)
 
 def load_snapshot():
@@ -81,7 +103,7 @@ def load_snapshot():
         relation = f[:-5]
         attr_dict = loadRelationMeta("meta/" + f)
         metaDict.setdefault(relation, attr_dict)
-    print("Successfully load metaDict", str(metaDict))
+    logging.debug("Successfully load metaDict " + str(metaDict))
 
     # load baseDB
     baseDB_path = 'baseDB/'
@@ -97,7 +119,7 @@ def load_snapshot():
                 lst = row[1:]
                 inner_mp = base_lst2mp(relation, lst)
                 baseDBDict[relation].setdefault(uuid, inner_mp)
-    print("Successfully load baseDBDict", str(baseDBDict))
+    logging.debug("Successfully load baseDBDict " + str(baseDBDict))
 
     # load btree
     btree_path = 'btree/'
@@ -114,7 +136,7 @@ def load_snapshot():
                 btree = pickle.load(f)
                 BTreeDict[relation].setdefault(attr, btree)
                 #print(BTreeDict[relation][attr])
-    print("Successfully load BTreeDict", str(BTreeDict))
+    logging.debug("Successfully load BTreeDict " + str(BTreeDict))
     #print(BTreeDict["ptr"]["id"]["909"])
             
     #load constraint
@@ -126,7 +148,7 @@ def load_snapshot():
         with open(getConstraintFileName(relation), 'rb') as file:
             mp = pickle.load(file)
             constraintDict.setdefault(relation, mp)
-    print("Successfully load constraintDict", str(constraintDict))
+    logging.debug("Successfully load constraintDict " + str(constraintDict))
     
 def getMetaFileName(relationName):
     return "meta/"+relationName+".meta"
@@ -159,12 +181,13 @@ def load_BaseDB(relationName):
     else:
         with open(getBaseDBFileName(relationName), 'rb') as file:
             mp = dill.load(file)
-            print(mp)
+            logging.debug(mp)#print(mp)
             baseDBDict.setdefault(relationName, mp)
              
 def create_table(relationName, cmd):
-    #print(metaModifier.create_table("name2salary",[("name","str"),("salary","int")),...])
-    #tuList = []
+    if relationName in metaDict.keys():
+        raiseErr("relation exists")
+
     mp = {}
     iter = 0
     while iter < len(cmd[1:]):
@@ -185,11 +208,11 @@ def write_row(relationName, cmd):
 
     mp = {}
     meta_dict = metaDict[relationName]
-    print(meta_dict)
+    logging.debug(meta_dict)
+    #print(meta_dict)
     for i, k in enumerate(meta_dict.keys()):
         if i >= len(cmd):
-            print('Error: Too few attributes for', k)
-            break
+            raiseErr('Error: Too few attributes for', k)
         data_type = meta_dict[k]
         attr_value = cmd[i]
         try:
@@ -199,8 +222,7 @@ def write_row(relationName, cmd):
                 attr_value = str(attr_value)
             mp[k] = attr_value
         except ValueError:
-            print('Error: Invalid type for', k)
-            break
+            raiseErr('Error: Invalid type for', k)
     else:
         # check primary key 
         if 'primary' in constraintDict[relationName]:
@@ -215,7 +237,7 @@ def write_row(relationName, cmd):
         baseDBDict[relationName].setdefault(btree_value,{})
         inner_mp = base_lst2mp(relationName, cmd)
         baseDBDict[relationName][btree_value] = inner_mp
-        print(baseDBDict)
+        logging.debug(baseDBDict)
 
         # update index
         # if relationName not in BTreeDict.
@@ -240,13 +262,15 @@ def query_equal(relationName, cmd):
     if relationName in BTreeDict.keys() and  attr in BTreeDict[relationName].keys():
         # TODO: test
         btree = BTreeDict[relationName][attr]
-        print(relationName, attr)
+        #print(relationName, attr)
+        logging.debug(str(relationName)+" " + str(attr))
 
         #print(list(btree.keys()))
         uu_set = btree[val]
-        print(uu_set)
+        #print(uu_set)
+        logging.debug(uu_set)
         for uu in uu_set:
-            print(uu, relationName)
+            logging.debug(uu, relationName)
             ret_list.append(baseDBDict[relationName][uu])
         print("By index, found: "+str(ret_list))
     else:
@@ -261,6 +285,7 @@ def query_equal(relationName, cmd):
     return ret_list
 
 def query_range(relationName, cmd):
+    # TODO 最大最小未指定
     mn = int(cmd[1])
     mx = int(cmd[2])
     k = cmd[0]
@@ -269,8 +294,8 @@ def query_range(relationName, cmd):
         btree = BTreeDict[relationName][k]
         print("range query by indexing...")
 
-        print(list(btree.keys()))
-        print(mn, mx)
+        logging.debug((list(btree.keys())))
+        logging.debug((mn, mx))
         for key, value in btree.items(min=mn, max=mx):
             found = True
             print(key, value)
@@ -286,8 +311,7 @@ def query_range(relationName, cmd):
 def create_index(relationName, cmd):
     indexAttr = cmd[0]
     if relationName in BTreeDict.keys() and indexAttr in BTreeDict[relationName].keys():
-        print("Index exists.")
-        return
+        raiseErr("Index exists.")
     if relationName not in BTreeDict.keys():
         BTreeDict.setdefault(relationName, {})
     if indexAttr not in BTreeDict[relationName].keys():
@@ -298,7 +322,7 @@ def create_index(relationName, cmd):
         if k not in btree.keys():
             btree[k] = set()
         btree[k].add(uu)
-        print(BTreeDict[relationName][indexAttr][baseDBDict[relationName][uu][indexAttr]])
+        logging.debug(BTreeDict[relationName][indexAttr][baseDBDict[relationName][uu][indexAttr]])
 
 def del_row(relationName, cmd):
     uu = cmd[0]
@@ -310,7 +334,7 @@ def del_row(relationName, cmd):
     del baseDBDict[relationName][uu]
 
 def create_primary(relationName, attr):
-    print(relationName, attr)
+    logging.debug(relationName, attr)
     if relationName not in constraintDict.keys():
         constraintDict.setdefault(relationName, {})
     if "primary" in constraintDict[relationName].keys():
@@ -319,7 +343,7 @@ def create_primary(relationName, attr):
         constraintDict[relationName].setdefault("primary", attr)
 
 def create_foreign(relationName, attr, rela2, attr2):
-    print(relationName, attr, rela2, attr2)
+    logging.debug(relationName, attr, rela2, attr2)
     if attr2 not in metaDict[rela2].keys():
         pass
     if metaDict[rela2][attr2] != metaDict[relationName][attr]:
@@ -349,7 +373,7 @@ def mem_exec(sql):
     # TODO? 根据语法树根节点，不采用字符串查询，不搞
     if sql.upper().find("CREATE TABLE") != -1:
         virtual_plan = parser_Create.virtual_plan_create(sql)
-        print(virtual_plan.__dict__)
+        logging.debug(virtual_plan.__dict__)
         lst = []
         for pr in virtual_plan.columns:
             lst.append(pr['name'])
@@ -361,13 +385,10 @@ def mem_exec(sql):
             # 只需要注册就行，不需要调用creat_index，因为baseDB没东西
             BTreeDict.setdefault(virtual_plan.table_name, OOBTree())
         if virtual_plan.foreign_key:
-            try:
-                create_foreign(
-                virtual_plan.table_name, virtual_plan.foreign_key["local_columns"][0], 
-                virtual_plan.foreign_key["table"], virtual_plan.foreign_key["foreign_columns"][0]
-                )        #promise, single attr
-            except ForeignKeyError as e:
-                print(f"Error: {e}")
+            create_foreign(
+            virtual_plan.table_name, virtual_plan.foreign_key["local_columns"][0], 
+            virtual_plan.foreign_key["table"], virtual_plan.foreign_key["foreign_columns"][0]
+            )        #promise, single attr
         
     elif sql.upper().find("DROP TABLE") != -1:
         pass
@@ -400,12 +421,10 @@ def dirty_cache_rollback_and_commit():
     load_snapshot()
     for query in tmpSQLLog:
         mem_exec(query)
-    tmpSQLLog.clear()
     persist_snapshot()
 
 def engine():
     load_snapshot()
-    #print("Got meta,", metaDict)
     sqlCounter = 0
     while True:
         # TODO:
@@ -413,20 +432,31 @@ def engine():
         # 或者，commit的东西，汇报commit
 
         # start work
+        print("Waiting for your sql, input quit to exit without cmd+C...")
+        print(">",end='')
         sql = read_sql()
+        if sql == "quit;":
+            print("Bye!")
+            exit(0)
+
         try:
             mem_exec(sql)
         except Exception as e:  # Capture any exception, raise runnable error like primary/foreign here
-            print("sql runtime error:", e)
+            err_logger.error(f"sql runtime error: {e}")
+            #print("sql runtime error:", e)
             print("Start cleaning dirty cache, rollback to commit previous sql...")
             dirty_cache_rollback_and_commit()
+            tmpSQLLog.clear()
+            print("==============================================================================")
             continue # skip regular persist
         sqlCounter += 1
         # persist
         if sqlCounter % snapShotInterVal == 0:
             #global baseDBDict, BTreeDict, metaDict, constraintDict
             persist_snapshot()
-            print("persist done")
+            tmpSQLLog.clear()
+            print("Periodcally persists done, all previous sql committed!")
+            print("==============================================================================")
 
 def main():
     engine()

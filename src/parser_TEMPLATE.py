@@ -4,6 +4,8 @@ from parser.antlr.SQLiteLexer import SQLiteLexer
 from parser.antlr.SQLiteParser import SQLiteParser
 from parser.antlr.SQLiteParserListener import SQLiteParserListener
 
+import logging
+
 # 英雄登场
 # 核心要改的内容
 class CreatePlan:
@@ -27,18 +29,18 @@ class CreateListener(SQLiteParserListener):
 
     def enterTable_constraint(self, ctx: SQLiteParser.Table_constraintContext):
         if ctx.PRIMARY_():
-            print(1)
+            logging.debug(1)
         if ctx.FOREIGN_():
             constraint = ctx.foreign_key_clause()
             foreign_key = {"table": constraint.foreign_table().getText()}
-            print(foreign_key)
+            logging.debug(foreign_key)
             local_columns = []
             foreign_columns = []
-            print(ctx.indexed_column())
+            logging.debug(ctx.indexed_column())
 
             cnt = 0
             for indexed_column in ctx.column_name():
-                print(indexed_column.getText())
+                logging.debug(indexed_column.getText())
                 local_columns.append(indexed_column.getText())
                 foreign_columns.append(ctx.foreign_key_clause().column_name()[0].getText())
                 cnt += 1
@@ -59,7 +61,7 @@ class CreateListener(SQLiteParserListener):
             for constraint in ctx.column_constraint():
                 if constraint.foreign_key_clause():
                     foreign_key = ctx.foreign_key_clause()
-                    print(f"Found foreign key constraint: {foreign_key.name(0)}({foreign_key.indexed_column(0).getText()}) references {foreign_key.foreign_table().getText()}({foreign_key.foreign_column(0).getText()})")
+                    logging.debug(f"Found foreign key constraint: {foreign_key.name(0)}({foreign_key.indexed_column(0).getText()}) references {foreign_key.foreign_table().getText()}({foreign_key.foreign_column(0).getText()})")
 
                 if constraint.PRIMARY_():
                     constraints.append({"type": "PRIMARYKEY"})
@@ -69,26 +71,13 @@ class CreateListener(SQLiteParserListener):
 
 # 直接复制
 def virtual_plan_create(sql):
-    print(sql)
-    # 创建一个输入流
+    logging.debug(sql)
     input_stream = InputStream(sql)
-
-    # 创建一个词法分析器
     lexer = SQLiteLexer(input_stream)
-
-    # 创建一个词法记号流
     token_stream = CommonTokenStream(lexer)
-
-    # 创建一个语法分析器
     parser = SQLiteParser(token_stream)
-
-    # 解析 SQL 语句，生成语法树
     tree = parser.parse()
-
-    # 创建一个 Listener 实例
     listener = CreateListener()
-
-    # 遍历语法树
     walker = ParseTreeWalker()
     walker.walk(listener, tree)
     return listener.plan
@@ -96,7 +85,6 @@ def virtual_plan_create(sql):
 # 自测这个单个模块用的
 # CREATE TABLE TTT(ID INT PRIMARY KEY);
 def main():
-    # 要解析的 SQL 语句
     sql = """
         CREATE TABLE orders (
         id INT PRIMARY KEY,
@@ -104,38 +92,18 @@ def main():
         FOREIGN KEY (customer_id) REFERENCES ptr(id)
         );
     """
-    ## {
-    # 'table_name': 'orders', 
-    # 'columns': [
-    #   {'name': 'id', 'type': 'INT', 'constraints': [{'type': 'PRIMARYKEY'}]}, 
-    #   {'name': 'customer_id', 'type': 'INT', 'constraints': []}, 
-    #   {'name': 'order_date', 'type': 'DATE', 'constraints': []}], 
-    # 'primary_key': 'id', 
-    # 'foreign_key': {'table': 'customers', 'local_columns': ['customer_id'], 'foreign_columns': ['id']}
-    # }
 
-    # 创建一个输入流
     input_stream = InputStream(sql)
-
-    # 创建一个词法分析器
     lexer = SQLiteLexer(input_stream)
-
-    # 创建一个词法记号流
     token_stream = CommonTokenStream(lexer)
-
-    # 创建一个语法分析器
     parser = SQLiteParser(token_stream)
-
-    # 解析 SQL 语句，生成语法树
     tree = parser.parse()
-
-    # 创建一个 Listener 实例
     listener = CreateListener()
-
-    # 遍历语法树
     walker = ParseTreeWalker()
     walker.walk(listener, tree)
 
     print(listener.plan.__dict__)
 
-main()
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.DEBUG)
+    main()

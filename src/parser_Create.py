@@ -3,6 +3,7 @@ from parser.antlr.SQLiteLexer import SQLiteLexer
 from parser.antlr.SQLiteParser import SQLiteParser
 from parser.antlr.SQLiteParserListener import SQLiteParserListener
 
+import logging
 class CreatePlan:
     def __init__(self):
         self.table_name = None
@@ -20,18 +21,18 @@ class CreateListener(SQLiteParserListener):
 
     def enterTable_constraint(self, ctx: SQLiteParser.Table_constraintContext):
         if ctx.PRIMARY_():
-            print(1)
+            logging.debug(1)
         if ctx.FOREIGN_():
             constraint = ctx.foreign_key_clause()
             foreign_key = {"table": constraint.foreign_table().getText()}
-            print(foreign_key)
+            logging.debug(foreign_key)
             local_columns = []
             foreign_columns = []
-            print(ctx.indexed_column())
+            logging.debug(ctx.indexed_column())
 
             cnt = 0
             for indexed_column in ctx.column_name():
-                print(indexed_column.getText())
+                logging.debug(indexed_column.getText())
                 local_columns.append(indexed_column.getText())
                 foreign_columns.append(ctx.foreign_key_clause().column_name()[0].getText())
                 cnt += 1
@@ -52,7 +53,7 @@ class CreateListener(SQLiteParserListener):
             for constraint in ctx.column_constraint():
                 if constraint.foreign_key_clause():
                     foreign_key = ctx.foreign_key_clause()
-                    print(f"Found foreign key constraint: {foreign_key.name(0)}({foreign_key.indexed_column(0).getText()}) references {foreign_key.foreign_table().getText()}({foreign_key.foreign_column(0).getText()})")
+                    logging.debug(f"Found foreign key constraint: {foreign_key.name(0)}({foreign_key.indexed_column(0).getText()}) references {foreign_key.foreign_table().getText()}({foreign_key.foreign_column(0).getText()})")
 
                 if constraint.PRIMARY_():
                     constraints.append({"type": "PRIMARYKEY"})
@@ -61,7 +62,7 @@ class CreateListener(SQLiteParserListener):
         self.plan.columns.append({"name": column_name, "type": data_type, "constraints": constraints})
 
 def virtual_plan_create(sql):
-    print(sql)
+    logging.debug(sql)
     # 创建一个输入流
     input_stream = InputStream(sql)
 
@@ -127,6 +128,9 @@ def main():
     walker = ParseTreeWalker()
     walker.walk(listener, tree)
 
-    print(listener.plan.__dict__)
+    logging.debug(listener.plan.__dict__)
 
-main()
+if __name__ == '__main__':
+    #print("22")
+    logging.basicConfig(level=logging.DEBUG)
+    main()
