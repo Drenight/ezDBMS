@@ -41,31 +41,48 @@ class SelectListener(SQLiteParserListener):
             attr = attr.getText()
             self.plan.attrs.append(attr)
         logging.debug(self.plan.attrs)
+
+        res_ctx = ctx.result_column()
+
+
         return super().enterSelect_core(ctx)    
 
     def enterExpr(self, ctx: SQLiteParser.ExprContext): # ((schema_name DOT)? table_name DOT)? column_name 语法，特定表列
         return super().enterExpr(ctx)
 
-    def enterResult_column(self, ctx: SQLiteParser.Result_columnContext):
+    def enterResult_column(self, ctx: SQLiteParser.Result_columnContext):       # enterSelect_core只会进一次，我们不嵌套，所以开个新的
+        # *进来的
         if ctx.STAR():  # tested
             self.plan.star = True
         
-        if ctx.table_name() != None:    # 
-            # TODO
+        # table1.* 进来的
+        if ctx.table_name() != None: 
+            print("table name is") 
+            print(ctx.table_name().getText())
             pass
         
-        # 不带星的应该都会有expr
+        # expr进来的，不带*
         expr_ctx = ctx.expr()
         if expr_ctx != None:
             if expr_ctx.table_name() != None:
                 # 捕获给定rela.的列
-                print(expr_ctx.table_name().any_name().getText())
+                print("given rela attrs: ",expr_ctx.table_name().getText())
             elif expr_ctx.column_name() != None:
-                # 捕获where的列，avg之类聚合的不会被捕获
-                print(expr_ctx.column_name())
-            else:
-                # TODO 聚合列
-                pass
+                # 捕获where的列，min之类聚合的不会被捕获
+                print(expr_ctx.column_name().getText())
+            elif expr_ctx.function_name()!= None:
+                # 聚合列
+                # function_name OPEN_PAR ((DISTINCT_? expr ( COMMA expr)*) | STAR)? CLOSE_PAR filter_clause? over_clause?
+                if expr_ctx.expr() == []: 
+                    # avg(*)这种
+                    print(expr_ctx.function_name().getText())
+                    print("*")
+                else:
+                    function_ctx = expr_ctx.expr()[0]
+                    print(expr_ctx.function_name().getText())   #avg这种
+                    if function_ctx != None:
+                        print("fin:",function_ctx.column_name().getText())
+
         return super().enterResult_column(ctx)
 
     def enterSelect_stmt(self, ctx: SQLiteParser.Select_stmtContext):
@@ -82,7 +99,7 @@ def virtual_plan_create(sql):
 
 def main():
     sql = """
-        SELECT ptr.*, ptr.id, ptr.name, name, avg(id) FROM ptr WHERE name = "Alice" and id = 1037 ORDER BY id LIMIT 10;
+        SELECT ptr.*, ptr.id, ptr.name, name, min(id), max(name), avg(*) FROM ptr WHERE name = "Alice" and id = 1037 ORDER BY id LIMIT 10;
     """
     sql2 = """
         SELECT * FROM ptr WHERE name = "Alice" and id = 1037 ORDER BY id LIMIT 10;
