@@ -1,36 +1,39 @@
-# 复制
 from antlr4 import *
 from parser.antlr.SQLiteLexer import SQLiteLexer
 from parser.antlr.SQLiteParser import SQLiteParser
 from parser.antlr.SQLiteParserListener import SQLiteParserListener
 
-# 英雄登场
+import logging
+
 # 核心要改的内容
 class DeletePlan:
     def __init__(self):
         # 这些属性，要改，根据你是什么语句，决定你要存哪些参数
         self.table_name = None
-        self.columns = []  # 列的信息，每一项包含列名、数据类型、是否为主键等
-        self.primary_key = None  # 主键的信息，包含主键名和包含哪些列
-        self.foreign_key = {}
+        self.condition = []  # TODO  这里是否用[]来储存
+        
 
 # 核心要改的内容
 class DeleteListener(SQLiteParserListener):
     def __init__(self):
-        self.plan = CreatePlan()
+        self.plan = DeletePlan()
 
-    # 开发的时候下面删掉
     # enter写那些这条语句，的语法树的各个节点的enter，拿信息
-    def enterCreate_table_stmt(self, ctx:SQLiteParser.Create_table_stmtContext):
-        # 获取表名
-        self.plan.table_name = ctx.table_name().getText()
+    def enterDelete_stmt(self, ctx:SQLiteParser.Delete_stmtContext):
+        self.plan.table_name = ctx.qualified_table_name().getText()
+        logging.debug(ctx.qualified_table_name().getText())
 
-    def enterTable_constraint(self, ctx: SQLiteParser.Table_constraintContext):
+    def enterExpr(self, ctx:SQLiteParser.ExprContext):
+        if ctx.parentCtx.getRuleIndex() == SQLiteParser.RULE_delete_stmt: #判断当前表达式所属的上下文（parentCtx）是否是一个DELETE语句（RULE_delete_stmt）
+            self.plan.condition.append(ctx.getText()) #如果是，则将表达式添加到查询计划的条件（condition）中
+
+    # TODO WHERE
+
 
 
 # 直接复制
-def virtual_plan_create(sql):
-    print(sql)
+def virtual_plan_delete(sql):
+    logging.debug(sql)
     # 创建一个输入流
     input_stream = InputStream(sql)
 
@@ -59,17 +62,13 @@ def virtual_plan_create(sql):
 def main():
     # 要解析的 SQL 语句
     sql = """
-        DELETE FROM table_name WHERE condition;
+        DELETE FROM ptr WHERE mask>=60 ;
     """
-    ## {
-    # 'table_name': 'orders', 
-    # 'columns': [
-    #   {'name': 'id', 'type': 'INT', 'constraints': [{'type': 'PRIMARYKEY'}]}, 
-    #   {'name': 'customer_id', 'type': 'INT', 'constraints': []}, 
-    #   {'name': 'order_date', 'type': 'DATE', 'constraints': []}], 
-    # 'primary_key': 'id', 
-    # 'foreign_key': {'table': 'customers', 'local_columns': ['customer_id'], 'foreign_columns': ['id']}
-    # }
+   # sql = """
+    #    DELETE FROM ptr AS ptr_ex WHERE mask >= 60 AND ; 不兼容AS语法
+   # """
+
+    
 
     # 创建一个输入流
     input_stream = InputStream(sql)
@@ -93,6 +92,8 @@ def main():
     walker = ParseTreeWalker()
     walker.walk(listener, tree)
 
-    print(listener.plan.__dict__)
+    logging.debug(listener.plan.__dict__)
 
-main()
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.DEBUG)
+    main()

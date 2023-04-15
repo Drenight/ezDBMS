@@ -3,6 +3,8 @@ from parser.antlr.SQLiteLexer import SQLiteLexer
 from parser.antlr.SQLiteParser import SQLiteParser
 from parser.antlr.SQLiteParserListener import SQLiteParserListener
 
+import logging
+
 #要改的内容
 class DropPlan:
     def __init__(self):
@@ -19,13 +21,13 @@ class DropListener(SQLiteParserListener):
     # 修改为处理 DROP TABLE 语句的方法
     def enterDrop_stmt(self, ctx: SQLiteParser.Drop_stmtContext):
         self.plan.table_name = ctx.any_name().getText()#ctx.table_name().getText()
-        print(self.plan.table_name)
+        logging.debug(self.plan.table_name)
         return super().enterDrop_stmt(ctx)
 
 
 # 直接复制
 def virtual_plan_drop(sql):
-    print(sql)
+    logging.debug(sql)
     # 创建一个输入流
     input_stream = InputStream(sql)
 
@@ -88,7 +90,8 @@ def main():
     walker = ParseTreeWalker()
     walker.walk(listener, tree)
 
-    print(listener.plan.__dict__)
+    logging.debug(listener.plan.__dict__)
 
 if __name__ == '__main__':
+   logging.basicConfig(level=logging.DEBUG)
    main()
