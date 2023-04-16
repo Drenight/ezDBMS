@@ -8,12 +8,18 @@ import logging
 
 class SelectPlan:
     def __init__(self):
-        self.table_name = None
-        self.star = None        # whether star showed
-        self.attrs = []         # rela -> tuple of attr TODO 特殊键WHERE怎么样？可以合并掉star
-        self.asName = None
+        self.queryAttr = []         # standard as (relaName, attr, min)
+        #self.rela2attr = {}         # rela -> tuple of attr
+        self.table_name = None 
+        self.noWhere = True
+        self.noAggr  = True
+        self.noJoin  = True
+
         self.orderBy = None
         self.limit = None
+        
+        self.txtAttrs = []
+        self.asName = None
 
 # select_core:
 #    (
@@ -41,14 +47,15 @@ class SelectListener(SQLiteParserListener):
         tmpList = list(ctx.result_column())
         for attr in tmpList:
             attr = attr.getText()
-            self.plan.attrs.append(attr)
-        logging.debug(self.plan.attrs)
+            self.plan.txtAttrs.append(attr)
+        logging.debug(self.plan.txtAttrs)
 
         # get from's relation
         if ctx.table_or_subquery() != []:
             fromCtx = ctx.table_or_subquery()[0]        # 单表，其他都写在join
             tableName = fromCtx.table_name().getText()
-            print("from table is:", tableName)
+            self.plan.table_name = tableName
+            logging.debug("from table is:" + str(tableName))
 
         # get join, if join table_or_subquery==[]
         joinCtx = ctx.join_clause()
@@ -78,7 +85,7 @@ class SelectListener(SQLiteParserListener):
             #print(len(joinCtx.join_operator()))
             #print("JOIN OP IS", joinOP.getText())
 
-            if joinCtx.join_constraint != None:
+            if joinCtx.join_constraint() != []:
                 joinCons = joinCtx.join_constraint()[0]
                 expr = joinCons.expr().getText()
                 print("expr is", expr)
@@ -91,14 +98,15 @@ class SelectListener(SQLiteParserListener):
     # 似乎手解if-else也不会比这个简单多少？avg(*),avg(table.col1),avg(col)，这个用框架做逻辑分类，降低心智成本？
     def enterResult_column(self, ctx: SQLiteParser.Result_columnContext):       # enterSelect_core只会进一次，我们不嵌套，所以开个新的
         # *进来的
-        if ctx.STAR():  # tested
-            self.plan.star = True
+        if ctx.STAR() and ctx.table_name() == None:
+            #print("pure *, from where", ctx.getText())
+            self.plan.queryAttr.append(("special_WHERE", '*', ''))
         
         # table1.* 进来的
         if ctx.table_name() != None: 
-            print("table name is") 
-            print(ctx.table_name().getText())
-            pass
+            #self.plan.rela2attr.setdefault(ctx.table_name().getText(), {'*'})
+            self.plan.queryAttr.append((ctx.table_name().getText(), '*', ''))
+            print("table name is", ctx.table_name().getText()) 
         
         # expr进来的，不带*
         expr_ctx = ctx.expr()
@@ -106,9 +114,13 @@ class SelectListener(SQLiteParserListener):
             if expr_ctx.table_name() != None:
                 # 捕获给定rela.的列
                 print("given rela attrs: ",expr_ctx.table_name().getText())
+                if expr_ctx.column_name() != None:  # 一定会进吧，SELECT 没有只给rela名的
+                    print(expr_ctx.column_name().getText())
+                    self.plan.queryAttr.append((expr_ctx.table_name().getText(), expr_ctx.column_name().getText(), ''))
             elif expr_ctx.column_name() != None:
                 # 捕获where的列，min之类聚合的不会被捕获
-                print(expr_ctx.column_name().getText())
+                #print("feel col", expr_ctx.column_name().getText())
+                self.plan.queryAttr.append(("special_WHERE", expr_ctx.column_name().getText(), ''))
             elif expr_ctx.function_name()!= None:
                 # 聚合列
                 # function_name OPEN_PAR ((DISTINCT_? expr ( COMMA expr)*) | STAR)? CLOSE_PAR filter_clause? over_clause?
@@ -116,14 +128,23 @@ class SelectListener(SQLiteParserListener):
                     # avg(*)这种
                     print(expr_ctx.function_name().getText())
                     print("fin: *")
+                    self.plan.queryAttr.append(("special_WHERE", '*', expr_ctx.function_name().getText()))
                 else:
                     function_ctx = expr_ctx.expr()[0]
                     print(expr_ctx.function_name().getText())   #avg这种
                     if function_ctx != None:
-                        print("fin:",function_ctx.column_name().getText())
-            else:   # 全None，是表达式
+                        if function_ctx.table_name()!=None:
+                            print("fin:",function_ctx.table_name().getText(), function_ctx.column_name().getText())
+                            self.plan.queryAttr.append((function_ctx.table_name().getText(), function_ctx.column_name().getText(), expr_ctx.function_name().getText()))
+                        else:
+                            self.plan.queryAttr.append(('special_WHERE', function_ctx.column_name().getText(), expr_ctx.function_name().getText()))
+            else:   # 全None，是表达式，暂不支持
                 print("REA==================")
                 print(expr_ctx.PLUS())
+
+        logging.debug("queryAttr updated, now: " + str(self.plan.queryAttr))
+
+        #print(self.plan.queryAttr)
 
         return super().enterResult_column(ctx)
 
@@ -135,11 +156,23 @@ class SelectListener(SQLiteParserListener):
 
 
 def virtual_plan_create(sql):
-    pass
+    logging.debug(sql)
+    input_stream = InputStream(sql)
+    lexer = SQLiteLexer(input_stream)
+    token_stream = CommonTokenStream(lexer)
+    parser = SQLiteParser(token_stream)
+    tree = parser.parse()
+    listener = SelectListener()
+    walker = ParseTreeWalker()
+    walker.walk(listener, tree)
+    return listener.plan
 
 def main():
-    sql = """
-        SELECT *, ptr.*,ptr.id, ptr.name, id, name, min(id), max(name), avg(*) FROM ptr LEFT JOIN ptr2 WHERE name = "Alice" and id = 1037 ORDER BY id LIMIT 10;
+    sql0 = """
+        SELECT * FROM ptr;
+    """
+    sql1 = """
+        SELECT *, ptr.*,ptr.id, ptr.name, id, name, min(ptr.id), min(id), max(name), avg(*) FROM ptr LEFT JOIN ptr2 WHERE name = "Alice" and id = 1037 ORDER BY id LIMIT 10;
     """
     sql2 = """
         SELECT * FROM ptr WHERE name = "Alice" and id = 1037 ORDER BY id LIMIT 10;
@@ -148,7 +181,7 @@ def main():
         SELECT * FROM A LEFT JOIN B ON 1=1;
     """
 
-    input_stream = InputStream(sql3)
+    input_stream = InputStream(sql0)
     lexer = SQLiteLexer(input_stream)
     token_stream = CommonTokenStream(lexer)
     parser = SQLiteParser(token_stream)
