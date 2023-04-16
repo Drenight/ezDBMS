@@ -1,3 +1,4 @@
+from ntpath import join
 from antlr4 import *
 from parser.antlr.SQLiteLexer import SQLiteLexer
 from parser.antlr.SQLiteParser import SQLiteParser
@@ -30,26 +31,64 @@ class SelectPlan:
 #    | values_clause
 #;
 
+# expr疑似都可以处理一下，直接调用eval？
 class SelectListener(SQLiteParserListener):
     def __init__(self):
         self.plan = SelectPlan()
 
     def enterSelect_core(self, ctx: SQLiteParser.Select_coreContext):
-        # get attrs
+        # get general attrs
         tmpList = list(ctx.result_column())
         for attr in tmpList:
             attr = attr.getText()
             self.plan.attrs.append(attr)
         logging.debug(self.plan.attrs)
 
-        res_ctx = ctx.result_column()
+        # get from's relation
+        if ctx.table_or_subquery() != []:
+            fromCtx = ctx.table_or_subquery()[0]        # 单表，其他都写在join
+            tableName = fromCtx.table_name().getText()
+            print("from table is:", tableName)
+
+        # get join, if join table_or_subquery==[]
+        joinCtx = ctx.join_clause()
+        if joinCtx != None:
+            for tar in joinCtx.table_or_subquery():
+                print("ww",tar.getText())
+
+            #Antlr-Python疑似有问题，INNER这种会被解析到rela1上来，这里手动解开
+            bad_set = set()
+            lst = ['INNER', 'LEFT', 'RIGHT', 'OUTER', 'CROSS', 'NATURAL']
+            for tu in lst:
+                bad_set.add(tu)
+                bad_set.add(tu.lower())
+            #print(bad_set)
+            rela1 = joinCtx.table_or_subquery()[0].getText()
+            rela2 = joinCtx.table_or_subquery()[1].getText()
+            joinOP = ""
+            for join_str in bad_set:
+                if join_str in rela1:
+                    joinOP = join_str
+                    rela1 = rela1.split(join_str)[0]
+                    print(rela1)
+                    break
+            print("rela1 is gonna join rela2:", rela1, rela2)
+            print("JOIN OP is", joinOP)
+            #joinOP = joinCtx.join_operator()[0]
+            #print(len(joinCtx.join_operator()))
+            #print("JOIN OP IS", joinOP.getText())
+
+            if joinCtx.join_constraint != None:
+                joinCons = joinCtx.join_constraint()[0]
+                expr = joinCons.expr().getText()
+                print("expr is", expr)
 
 
         return super().enterSelect_core(ctx)    
 
-    def enterExpr(self, ctx: SQLiteParser.ExprContext): # ((schema_name DOT)? table_name DOT)? column_name 语法，特定表列
-        return super().enterExpr(ctx)
-
+    # HOLD, attrs不是已经拿到了吗，如果只是为了填充虚拟计划，这样解析的意义是什么？  
+    # 合法性吗？ 不是，SELECT )*( FROM TABLE A; 就算不写下面的解析也是会报错的
+    # 似乎手解if-else也不会比这个简单多少？avg(*),avg(table.col1),avg(col)，这个用框架做逻辑分类，降低心智成本？
     def enterResult_column(self, ctx: SQLiteParser.Result_columnContext):       # enterSelect_core只会进一次，我们不嵌套，所以开个新的
         # *进来的
         if ctx.STAR():  # tested
@@ -73,15 +112,18 @@ class SelectListener(SQLiteParserListener):
             elif expr_ctx.function_name()!= None:
                 # 聚合列
                 # function_name OPEN_PAR ((DISTINCT_? expr ( COMMA expr)*) | STAR)? CLOSE_PAR filter_clause? over_clause?
-                if expr_ctx.expr() == []: 
+                if expr_ctx.STAR(): #等效 expr_ctx.expr() == []: 
                     # avg(*)这种
                     print(expr_ctx.function_name().getText())
-                    print("*")
+                    print("fin: *")
                 else:
                     function_ctx = expr_ctx.expr()[0]
                     print(expr_ctx.function_name().getText())   #avg这种
                     if function_ctx != None:
                         print("fin:",function_ctx.column_name().getText())
+            else:   # 全None，是表达式
+                print("REA==================")
+                print(expr_ctx.PLUS())
 
         return super().enterResult_column(ctx)
 
@@ -92,20 +134,21 @@ class SelectListener(SQLiteParserListener):
         return super().enterOrder_by_stmt(ctx)
 
 
-
-
 def virtual_plan_create(sql):
     pass
 
 def main():
     sql = """
-        SELECT ptr.*, ptr.id, ptr.name, name, min(id), max(name), avg(*) FROM ptr WHERE name = "Alice" and id = 1037 ORDER BY id LIMIT 10;
+        SELECT *, ptr.*,ptr.id, ptr.name, id, name, min(id), max(name), avg(*) FROM ptr LEFT JOIN ptr2 WHERE name = "Alice" and id = 1037 ORDER BY id LIMIT 10;
     """
     sql2 = """
         SELECT * FROM ptr WHERE name = "Alice" and id = 1037 ORDER BY id LIMIT 10;
     """
+    sql3 = """
+        SELECT * FROM A LEFT JOIN B ON 1=1;
+    """
 
-    input_stream = InputStream(sql)
+    input_stream = InputStream(sql3)
     lexer = SQLiteLexer(input_stream)
     token_stream = CommonTokenStream(lexer)
     parser = SQLiteParser(token_stream)
