@@ -8,6 +8,8 @@ import pickle
 # my parsers
 import parser_CreateTable
 import parser_Insert
+import parser_Select
+from prettytable import PrettyTable
 from BTrees.OOBTree import OOBTree
 
 ############################### Core Mem Data Structure & magic number config #############
@@ -16,7 +18,7 @@ BTreeDict = {}                          # [relation][attribute] -> BTree, each k
 metaDict = {}                           # [relation]            -> {id:int, name:str}
 constraintDict = {}                     # [relation]            -> {primary: attr, foreign:{attr:id, rela2:, rela_attr:}}
 
-snapShotInterVal = 1
+snapShotInterVal = 2
 tmpSQLLog = []
 
 ############################### dev tools, for debug and log ###############################
@@ -28,7 +30,7 @@ class ColoredFormatter(logging.Formatter):
         return super(ColoredFormatter, self).format(record)
 
 # configure the root logger to handle all log levels
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.ERROR)
 
 # create a console handler and set its formatter to the colored formatter
 console_handler = logging.StreamHandler()
@@ -372,6 +374,10 @@ def read_sql():
             sql += line + " "
     return sql
 
+class aggrAffi:
+    minFlag = False
+    nowMin = None
+
 def mem_exec(sql):
     op = 999
     # create table 
@@ -409,6 +415,100 @@ def mem_exec(sql):
             #op_list.append(virtual_plan.columnsKey[i])
             op_list.append(virtual_plan.columnsValue[i])
         write_row(virtual_plan.table_name, op_list)
+    
+    #forjoin select *, id2salary.id, name from ptr;
+    # select *, name from ptr;
+    elif sql.upper().find("SELECT") != -1:
+        ret_list = []
+        virtual_plan = parser_Select.virtual_plan_create(sql)
+        logging.debug("virtual plan done, it's like: " + str(virtual_plan.__dict__))
+        if virtual_plan.noJoin:
+            if virtual_plan.noWhere : # register what need to be store, during linear scan
+                if virtual_plan.noAggr:
+                    # Basic linear scan, done
+                    #+--------+----------+---------+-----------+
+                    #| ptr.id | ptr.name | ptr.id  | ptr.name  |
+                    #+--------+----------+---------+-----------+
+                    #|  707   |   Bob    |   707   |    Bob    |
+                    #|  1037  |  Alice   |   1037  |   Alice   |
+                    #|  122   |  Alice   |   122   |   Alice   |
+                    #+--------+----------+---------+-----------+
+                    mpAttr = {}
+                    for tu in virtual_plan.queryAttr:
+                        rela = tu[0]
+                        if rela == 'special_WHERE':
+                            rela = virtual_plan.table_name
+                        if rela not in mpAttr.keys():
+                            mpAttr.setdefault(rela,{})
+                        if tu[1] == '*':
+                            for attr in metaDict[rela].keys():
+                                if attr not in mpAttr[rela].keys():
+                                    mpAttr[rela].setdefault(attr, [])
+                        else:
+                            if tu[1] not in mpAttr[rela].keys():
+                                mpAttr[rela].setdefault(tu[1], [])
+                    logging.debug("mpAttr is like:" + str(mpAttr))
+                    
+                    # Start linear scanning...
+                    row_cnt = 0
+                    for rela in mpAttr.keys():
+                        for row_uu in baseDBDict[rela]:                    
+                            for attr in mpAttr[rela]:
+                                #if attr in baseDBDict[rela][row_uu].keys(): 别判断，让他自动炸了，外面有捕获
+                                mpAttr[rela][attr].append(baseDBDict[rela][row_uu][attr])
+                            row_cnt += 1    
+
+                    # Fill in ret, zip, one table meant to be aligned, no join
+                    for iter in range(row_cnt):
+                        tmpLst = []
+                        for tu in virtual_plan.queryAttr:
+                            rela = tu[0]
+                            if rela == 'special_WHERE':
+                                rela = virtual_plan.table_name
+                            if tu[1] == '*':
+                                for attr in metaDict[rela].keys():
+                                    now_entry = mpAttr[rela][attr][iter]
+                                    tmpLst.append(now_entry)
+                            else:
+                                now_entry = mpAttr[rela][tu[1]][iter]
+                                tmpLst.append(now_entry)
+                        ret_list.append(tmpLst)
+                    
+                    # Time to print results
+                    print("By linear scaning, query done, result as follows:")
+                    colNameForPrint = []
+                    colNameSet = set()  # interesting point, PrettyTable bans duplicate field names
+
+                    for tu in virtual_plan.queryAttr:
+                        rela = tu[0]
+                        if rela == 'special_WHERE':
+                            rela = virtual_plan.table_name
+                        if tu[1] == '*':
+                            for attr in metaDict[rela].keys():
+                                col = str(rela)+'.'+str(attr)
+                                while col in colNameSet:        # trick
+                                    logging.debug("making more longer name for PrettyTable")
+                                    col = col+" "
+                                colNameSet.add(col)
+                                colNameForPrint.append(col)
+                        else:
+                            col = str(rela)+'.'+str(tu[1])
+                            while col in colNameSet:
+                                logging.debug("making more longer name for PrettyTable")
+                                col = col+" "
+                            colNameSet.add(col)
+                            colNameForPrint.append(col)
+
+                    table = PrettyTable(colNameForPrint)
+                    for row in ret_list:
+                        table.add_row(row)
+                    print(table)
+                else:   #has aggr
+                    pass
+            else:   # has where, might utlize indexing
+                pass
+        else:   # has join
+            pass
 
     # basic demo
     if int(op) == 0:      # 0 test_table id int name str
@@ -449,6 +549,7 @@ def engine():
         # 或者，commit的东西，汇报commit
 
         # start work
+        print("==============================================================================")
         print("Waiting for your sql, input quit to exit without cmd+C...")
         print(">",end='')
         sql = read_sql()
@@ -464,7 +565,6 @@ def engine():
             print("Start cleaning dirty cache, rollback to commit previous sql...")
             dirty_cache_rollback_and_commit()
             tmpSQLLog.clear()
-            print("==============================================================================")
             continue # skip regular persist
         sqlCounter += 1
         # persist
@@ -473,7 +573,6 @@ def engine():
             persist_snapshot()
             tmpSQLLog.clear()
             print("Periodcally persists done, all previous sql committed!")
-            print("==============================================================================")
 
 def main():
     engine()
