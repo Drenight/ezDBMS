@@ -6,14 +6,41 @@ from parser.antlr.SQLiteParserListener import SQLiteParserListener
 
 import logging
 
+#   | expr ( LT2 | GT2 | AMP | PIPE) expr
+#   | expr ( LT | LT_EQ | GT | GT_EQ) expr
+#   | expr (
+#       ASSIGN
+#       | EQ
+#       | NOT_EQ1
+#       | NOT_EQ2
+#       | IS_
+#       | IS_ NOT_
+#       | IN_
+#       | LIKE_
+#       | GLOB_
+#       | MATCH_
+#       | REGEXP_
+#   ) expr
+#   | expr AND_ expr
+#   | expr OR_ expr
 class SelectPlan:
     def __init__(self):
         self.queryAttr = []         # standard as (relaName, attr, min)
         #self.rela2attr = {}         # rela -> tuple of attr
         self.table_name = None 
-        self.noWhere = True
-        self.noAggr  = True
-        self.noJoin  = True
+        self.Where = False
+        self.Aggr  = False
+        self.Join  = False
+
+        self.Group = False
+        self.group_attr = None
+
+        self.Having = False
+        self.having_expr = None
+        self.having_logic = None        # "AND".lower()
+        self.having_expr1_eval = None   # MIN(ptr.id) >= 3700
+
+        self.having_expr2_eval = None   # MIN(ptr.name) == 'Alice'
 
         self.orderBy = None
         self.limit = None
@@ -52,14 +79,48 @@ class SelectListener(SQLiteParserListener):
 
         # get from's relation
         if ctx.table_or_subquery() != []:
-            fromCtx = ctx.table_or_subquery()[0]        # 单表，其他都写在join
+            fromCtx = ctx.table_or_subquery()[0]        # 单表，其他都在join_clause解
             tableName = fromCtx.table_name().getText()
             self.plan.table_name = tableName
             logging.debug("from table is:" + str(tableName))
 
+        # get group 
+        groupAttrList = ctx.groupByExpr
+        if groupAttrList != []:
+            self.plan.Group = True
+            self.plan.group_attr = groupAttrList[0].getText()              # TODO，约定单列group
+
+        # get having, make it eval-available
+        if ctx.havingExpr != None:
+            # solve logic and or
+            self.plan.having_expr = ctx.havingExpr.getText()
+            havingExprCtx = ctx.havingExpr
+            if str(havingExprCtx.AND_()) == 'AND':
+                self.plan.having_logic = 'and'
+            elif str(havingExprCtx.OR_()) == 'OR':
+                self.plan.having_logic = 'or'
+
+            print("logic is ", self.plan.having_logic)
+            print("having expr:", self.plan.having_expr)
+            if self.plan.having_logic != None:
+                self.plan.having_expr1_eval = self.plan.having_expr[:self.plan.having_expr.index(self.plan.having_logic.upper())]
+                self.plan.having_expr2_eval = self.plan.having_expr[self.plan.having_expr.index(self.plan.having_logic.upper())+len(self.plan.having_logic):]
+            else:
+                self.plan.having_expr1_eval = self.plan.having_expr
+                self.plan.having_expr2_eval = None 
+            # = -> ==   
+            s1 = self.plan.having_expr1_eval
+            s2 = self.plan.having_expr2_eval
+            if '!' not in s1 and '<' not in s1 and '>' not in s1 and '=' in s1:
+                self.plan.having_expr1_eval = self.plan.having_expr1_eval.replace('=', '==')
+            if s2 != None and '!' not in s2 and '<' not in s2 and '>' not in s2 and '=' in s2:
+                self.plan.having_expr2_eval = self.plan.having_expr2_eval.replace('=', '==')
+        # having done?
+
         # get join, if join table_or_subquery==[]
         joinCtx = ctx.join_clause()
         if joinCtx != None:
+            self.plan.Join = True
             for tar in joinCtx.table_or_subquery():
                 print("ww",tar.getText())
 
@@ -89,7 +150,6 @@ class SelectListener(SQLiteParserListener):
                 joinCons = joinCtx.join_constraint()[0]
                 expr = joinCons.expr().getText()
                 print("expr is", expr)
-
 
         return super().enterSelect_core(ctx)    
 
@@ -123,6 +183,8 @@ class SelectListener(SQLiteParserListener):
                 self.plan.queryAttr.append(("special_WHERE", expr_ctx.column_name().getText(), ''))
             elif expr_ctx.function_name()!= None:
                 # 聚合列
+                # 聚合列的填充，放到分完组之后再做吧？是的，还得在having之后
+                self.plan.Aggr = True
                 # function_name OPEN_PAR ((DISTINCT_? expr ( COMMA expr)*) | STAR)? CLOSE_PAR filter_clause? over_clause?
                 if expr_ctx.STAR(): #等效 expr_ctx.expr() == []: 
                     # avg(*)这种
@@ -171,8 +233,9 @@ def main():
     sql0 = """
         SELECT * FROM ptr;
     """
+    # only for parsing
     sql1 = """
-        SELECT *, ptr.*,ptr.id, ptr.name, id, name, min(ptr.id), min(id), max(name), avg(*) FROM ptr LEFT JOIN ptr2 WHERE name = "Alice" and id = 1037 ORDER BY id LIMIT 10;
+        SELECT *, ptr.*,ptr.id, ptr.name, id, name, MIN(ptr.id), MIN(id), MAX(name), AVG(*) FROM ptr LEFT JOIN ptr2 WHERE name = "Alice" and id = 1037 ORDER BY id LIMIT 10;
     """
     sql2 = """
         SELECT * FROM ptr WHERE name = "Alice" and id = 1037 ORDER BY id LIMIT 10;
@@ -180,8 +243,14 @@ def main():
     sql3 = """
         SELECT * FROM A LEFT JOIN B ON 1=1;
     """
+    sql4 = """
+        SELECT min(id2salary.id), min(id2salary.salary) FROM id2salary GROUP BY id2salary.id HAVING MIN(id2salary.salary)>=1500 AND MIN(id2salary.salary)=2700;
+    """
+    sql5 = """
+        SELECT id2salary.id, MIN(id2salary.salary) FROM id2salary GROUP BY id2salary.id HAVING MIN(id2salary.salary)>=1500;
+    """
 
-    input_stream = InputStream(sql0)
+    input_stream = InputStream(sql5)
     lexer = SQLiteLexer(input_stream)
     token_stream = CommonTokenStream(lexer)
     parser = SQLiteParser(token_stream)

@@ -30,7 +30,7 @@ class ColoredFormatter(logging.Formatter):
         return super(ColoredFormatter, self).format(record)
 
 # configure the root logger to handle all log levels
-logging.basicConfig(level=logging.ERROR)
+logging.basicConfig(level=logging.DEBUG)
 
 # create a console handler and set its formatter to the colored formatter
 console_handler = logging.StreamHandler()
@@ -378,6 +378,15 @@ class aggrAffi:
     minFlag = False
     nowMin = None
 
+def aggr_row_func(rowList, aggr_func, target_attr):  # row is a list of {'id2salary.id': 909, 'id2salary.salary': 2000}
+    print(rowList)
+    ret = rowList[0][target_attr]
+    for row in rowList:
+        if aggr_func == "MIN":
+            ret = min(ret, row[target_attr])
+    
+    return ret
+
 def mem_exec(sql):
     op = 999
     # create table 
@@ -420,11 +429,100 @@ def mem_exec(sql):
     # select *, name from ptr;
     elif sql.upper().find("SELECT") != -1:
         ret_list = []
+        ret_list_dict = []   #TODO 兼容join，消除上面那个？新表每行替换成字典的版本(列名带上ptr.)，不维护顺序，维护列对应
+        # 不支持重复列了吧，麻烦死了，重复列
         virtual_plan = parser_Select.virtual_plan_create(sql)
         logging.debug("virtual plan done, it's like: " + str(virtual_plan.__dict__))
-        if virtual_plan.noJoin:
-            if virtual_plan.noWhere : # register what need to be store, during linear scan
-                if virtual_plan.noAggr:
+        if not virtual_plan.Join:
+            if not virtual_plan.Where :
+                # 重复列的冗余优化？考虑删了
+                mpAttr = {}
+                for tu in virtual_plan.queryAttr:
+                    rela = tu[0]
+                    if rela == 'special_WHERE':
+                        rela = virtual_plan.table_name
+                    if rela not in mpAttr.keys():
+                        mpAttr.setdefault(rela,{})
+                    if tu[1] == '*':
+                        for attr in metaDict[rela].keys():
+                            if attr not in mpAttr[rela].keys():
+                                mpAttr[rela].setdefault(attr, [])
+                    else:
+                        if tu[1] not in mpAttr[rela].keys():
+                            mpAttr[rela].setdefault(tu[1], [])
+                logging.debug("mpAttr is like:" + str(mpAttr))
+                
+                # Start linear scanning...
+                row_cnt = 0
+                for rela in mpAttr.keys():
+                    for row_uu in baseDBDict[rela]:                    
+                        for attr in mpAttr[rela]:
+                            #if attr in baseDBDict[rela][row_uu].keys(): 别判断，让他自动炸了，外面有捕获
+                            mpAttr[rela][attr].append(baseDBDict[rela][row_uu][attr])
+                        row_cnt += 1    
+
+                # Fill in ret, zip, one table meant to be aligned, no join
+                # ret_list_dict = []
+                for iter in range(row_cnt):
+                    tmpLst = []
+                    tmpDict = {}
+                    for tu in virtual_plan.queryAttr:
+                        rela = tu[0]
+                        if rela == 'special_WHERE':
+                            rela = virtual_plan.table_name
+                        if tu[1] == '*':
+                            for attr in metaDict[rela].keys():
+                                now_entry = mpAttr[rela][attr][iter]
+                                tmpLst.append(now_entry)
+                                com_attr = rela+"."+attr
+                                if com_attr not in tmpDict.keys():
+                                    tmpDict.setdefault(com_attr, now_entry)
+                                else:
+                                    # TODO check
+                                    logging.warning("Weird path, check please.")
+                        else:
+                            now_entry = mpAttr[rela][tu[1]][iter]
+                            tmpLst.append(now_entry)
+                            com_attr = rela+"."+tu[1]
+                            if com_attr not in tmpDict.keys():
+                                tmpDict.setdefault(com_attr, now_entry)
+                    ret_list.append(tmpLst)
+                    ret_list_dict.append(tmpDict)
+                
+                logging.debug("ret_list_dict"+str(ret_list_dict))
+
+                # Time to print results
+                print("By linear scaning, query done, result as follows:")
+                colNameForPrint = []
+                colNameSet = set()  # interesting point, PrettyTable bans duplicate field names
+
+                # 重复列trick，进dict不准备沿用了，太难维护
+                for tu in virtual_plan.queryAttr:
+                    rela = tu[0]
+                    if rela == 'special_WHERE':
+                        rela = virtual_plan.table_name
+                    if tu[1] == '*':
+                        for attr in metaDict[rela].keys():
+                            col = str(rela)+'.'+str(attr)
+                            if tu[2] != "":
+                                col = tu[2]+'('+col+')'
+                            while col in colNameSet:        # trick
+                                logging.debug("making more longer name for PrettyTable")
+                                col = col+" "
+                            colNameSet.add(col)
+                            colNameForPrint.append(col)
+                    else:
+                        col = str(rela)+'.'+str(tu[1])
+                        if tu[2] != "":
+                            col = tu[2]+'('+col+')'
+                        while col in colNameSet:
+                            logging.debug("making more longer name for PrettyTable")
+                            col = col+" "
+                        colNameSet.add(col)
+                        colNameForPrint.append(col)
+
+                # no group by, just print
+                if not virtual_plan.Aggr:
                     # Basic linear scan, done
                     #+--------+----------+---------+-----------+
                     #| ptr.id | ptr.name | ptr.id  | ptr.name  |
@@ -433,78 +531,70 @@ def mem_exec(sql):
                     #|  1037  |  Alice   |   1037  |   Alice   |
                     #|  122   |  Alice   |   122   |   Alice   |
                     #+--------+----------+---------+-----------+
-                    mpAttr = {}
-                    for tu in virtual_plan.queryAttr:
-                        rela = tu[0]
-                        if rela == 'special_WHERE':
-                            rela = virtual_plan.table_name
-                        if rela not in mpAttr.keys():
-                            mpAttr.setdefault(rela,{})
-                        if tu[1] == '*':
-                            for attr in metaDict[rela].keys():
-                                if attr not in mpAttr[rela].keys():
-                                    mpAttr[rela].setdefault(attr, [])
-                        else:
-                            if tu[1] not in mpAttr[rela].keys():
-                                mpAttr[rela].setdefault(tu[1], [])
-                    logging.debug("mpAttr is like:" + str(mpAttr))
-                    
-                    # Start linear scanning...
-                    row_cnt = 0
-                    for rela in mpAttr.keys():
-                        for row_uu in baseDBDict[rela]:                    
-                            for attr in mpAttr[rela]:
-                                #if attr in baseDBDict[rela][row_uu].keys(): 别判断，让他自动炸了，外面有捕获
-                                mpAttr[rela][attr].append(baseDBDict[rela][row_uu][attr])
-                            row_cnt += 1    
-
-                    # Fill in ret, zip, one table meant to be aligned, no join
-                    for iter in range(row_cnt):
-                        tmpLst = []
-                        for tu in virtual_plan.queryAttr:
-                            rela = tu[0]
-                            if rela == 'special_WHERE':
-                                rela = virtual_plan.table_name
-                            if tu[1] == '*':
-                                for attr in metaDict[rela].keys():
-                                    now_entry = mpAttr[rela][attr][iter]
-                                    tmpLst.append(now_entry)
-                            else:
-                                now_entry = mpAttr[rela][tu[1]][iter]
-                                tmpLst.append(now_entry)
-                        ret_list.append(tmpLst)
-                    
-                    # Time to print results
-                    print("By linear scaning, query done, result as follows:")
-                    colNameForPrint = []
-                    colNameSet = set()  # interesting point, PrettyTable bans duplicate field names
-
-                    for tu in virtual_plan.queryAttr:
-                        rela = tu[0]
-                        if rela == 'special_WHERE':
-                            rela = virtual_plan.table_name
-                        if tu[1] == '*':
-                            for attr in metaDict[rela].keys():
-                                col = str(rela)+'.'+str(attr)
-                                while col in colNameSet:        # trick
-                                    logging.debug("making more longer name for PrettyTable")
-                                    col = col+" "
-                                colNameSet.add(col)
-                                colNameForPrint.append(col)
-                        else:
-                            col = str(rela)+'.'+str(tu[1])
-                            while col in colNameSet:
-                                logging.debug("making more longer name for PrettyTable")
-                                col = col+" "
-                            colNameSet.add(col)
-                            colNameForPrint.append(col)
-
                     table = PrettyTable(colNameForPrint)
                     for row in ret_list:
                         table.add_row(row)
-                    print(table)
-                else:   #has aggr
-                    pass
+                        print(table)
+                # Time to do group by && having
+                else:   #这种的，记得列名打全了
+                    #+--------------+-----------------------+
+                    #| id2salary.id | MIN(id2salary.salary) |
+                    #+--------------+-----------------------+
+                    #|     909      |          2000         |
+                    #|     707      |          1500         |
+                    #+--------------+-----------------------+
+                    logging.info("dict ver: " + str(ret_list_dict))
+                    grpMP = {}
+                    for row_uu in baseDBDict[rela]:                    
+                        for attr in mpAttr[rela]:
+                            #if attr in baseDBDict[rela][row_uu].keys(): 别判断，让他自动炸了，外面有捕获
+                            mpAttr[rela][attr].append(baseDBDict[rela][row_uu][attr])
+                        row_cnt += 1    
+
+                    for rowMP in ret_list_dict:
+                        #print("GROUP", row, virtual_plan.group_attr, virtual_plan.having_expr)
+                        # TODO 矩阵里，哪一列是group_attr？
+                        # zip时候另缝一个字典版本？一份表当然可以重用mpAttr，但兼容join的话还是让新表重新生成一个字典版本比较好？
+                        if rowMP[virtual_plan.group_attr] not in grpMP.keys():
+                            grpMP.setdefault(rowMP[virtual_plan.group_attr], [])
+                        grpMP[rowMP[virtual_plan.group_attr]].append(rowMP)
+                        #grpMP[virtual_plan.group_attr].append()
+
+                    print("grouping done, now grpMP is:", grpMP) 
+                    # grouping done, now grpMP is: {909: [{'id2salary.id': 909, 'id2salary.salary': 2000}], 707: [{'id2salary.id': 707, 'id2salary.salary': 2000}, {'id2salary.id': 707, 'id2salary.salary': 1500}]}
+
+                    # Filter by having
+                    valid_groupAttr_set = set()
+                    #having_expr = virtual_plan.having_expr1_eval
+                    aggr_func = virtual_plan.having_expr1_eval[:virtual_plan.having_expr1_eval.index('(')] #MIN
+                    target_attr = virtual_plan.having_expr1_eval[virtual_plan.having_expr1_eval.index('(')+1 : virtual_plan.having_expr1_eval.index(')')]
+                    print(aggr_func, target_attr)
+                    for aggr_attr_value in grpMP.keys():
+                        #for rowMP in grpMP[aggr_attr_value]:
+                        ans = aggr_row_func(grpMP[aggr_attr_value], aggr_func, target_attr)
+                        tmpEvalS = virtual_plan.having_expr1_eval.replace(virtual_plan.having_expr1_eval[:virtual_plan.having_expr1_eval.index(')')+1], str(ans))
+                        print(tmpEvalS)
+                        if eval(tmpEvalS):  # 天才？！这是不是就是SQL注入啊？
+                            valid_groupAttr_set.add(aggr_attr_value)
+                        #final_list.append(grpMP)
+                    print(valid_groupAttr_set)
+                    
+                    table = PrettyTable(colNameForPrint)
+
+                    for aggr_attr_value in grpMP.keys():
+                        if aggr_attr_value in valid_groupAttr_set:
+                            tmpList = []
+                            for tu in virtual_plan.queryAttr:
+                                if tu[2] == '': #group by
+                                    tmpList.append(aggr_attr_value)
+                                else:   #手动聚合
+                                    tmpList.append(aggr_row_func(grpMP[aggr_attr_value], tu[2], tu[0]+'.'+tu[1]))
+                            table.add_row(tmpList)
+                   
+                    print(table)        
+
+                #else:   #has aggr
+                #    pass
             else:   # has where, might utlize indexing
                 pass
         else:   # has join

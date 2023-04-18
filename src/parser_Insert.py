@@ -19,7 +19,8 @@ class InsertListener(SQLiteParserListener):
     def enterInsert_stmt(self, ctx: SQLiteParser.Insert_stmtContext):
         self.plan.table_name = ctx.table_name().getText()
         logging.debug(ctx.table_name().getText())
-        self.plan.asName = ctx.table_alias().getText()
+        if ctx.table_alias() != None:
+            self.plan.asName = ctx.table_alias().getText()
         for k in ctx.column_name():
             logging.debug(k.getText())
             self.plan.columnsKey.append(k.getText())
