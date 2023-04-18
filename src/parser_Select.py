@@ -290,6 +290,9 @@ def main():
     sql8 = """
         SELECT * FROM id2salary WHERE id2salary.salary=1500 AND id2salary.id=707;
     """
+    sql9 = """
+        SELECT min(id2salary.id), min(id2salary.salary) FROM id2salary WHERE id2salary.id=707 GROUP BY id2salary.id HAVING MIN(id2salary.salary)>=1500 OR MIN(id2salary.salary)<2000;
+    """
 
     input_stream = InputStream(sql7)
     lexer = SQLiteLexer(input_stream)

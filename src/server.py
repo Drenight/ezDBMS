@@ -457,18 +457,32 @@ def mem_exec(sql):
             
             # Start linear scanning...
             if virtual_plan.where_expr != None:
-                brkRelaNameIndex = 0
-                brkAttrNameIndex = 0
+                brkRelaNameIndex1 = 0
+                brkRelaNameIndex2 = 0
+                brkAttrNameIndex1 = 0
+                brkAttrNameIndex2 = 0
+
                 for ch in virtual_plan.where_expr1_eval:
                     if not ch.isalnum() and ch=='.':
-                        brkRelaNameIndex = brkAttrNameIndex
+                        brkRelaNameIndex1 = brkAttrNameIndex1
                     if not ch.isalnum() and ch!='.':
                         break
-                    brkAttrNameIndex += 1
+                    brkAttrNameIndex1 += 1
+                if virtual_plan.where_expr2_eval != None:
+                    for ch in virtual_plan.where_expr2_eval:
+                        if not ch.isalnum() and ch=='.':
+                            brkRelaNameIndex2 = brkAttrNameIndex2
+                        if not ch.isalnum() and ch!='.':
+                            break
+                        brkAttrNameIndex2 += 1
 
-                where_expr1_rela = virtual_plan.where_expr1_eval[:brkRelaNameIndex]
-                where_expr1_attr = virtual_plan.where_expr1_eval[brkRelaNameIndex+1:brkAttrNameIndex]
-                logging.debug("first where expr rela&attr is "+str(where_expr1_rela)+"&"+str(where_expr1_attr))
+                where_expr1_rela = virtual_plan.where_expr1_eval[:brkRelaNameIndex1]
+                where_expr1_attr = virtual_plan.where_expr1_eval[brkRelaNameIndex1+1:brkAttrNameIndex1]
+                logging.debug("First where expr rela&attr is "+str(where_expr1_rela)+"&"+str(where_expr1_attr))
+                if virtual_plan.where_expr2_eval != None:
+                    where_expr2_rela = virtual_plan.where_expr2_eval[:brkRelaNameIndex2]
+                    where_expr2_attr = virtual_plan.where_expr2_eval[brkRelaNameIndex2+1:brkAttrNameIndex2]
+                    logging.debug("Second where expr rela&attr is "+str(where_expr2_rela)+"&"+str(where_expr2_attr))
                 #ans = baseDBDict[rela][row_uu][where_expr1_attr]
 
             row_cnt = 0
@@ -479,16 +493,19 @@ def mem_exec(sql):
                         #if attr in baseDBDict[rela][row_uu].keys(): 别判断，让他自动炸了，外面有捕获
                             mpAttr[rela][attr].append(baseDBDict[rela][row_uu][attr])
                         row_cnt += 1
-                    else:   # use where filter rows
+                    elif virtual_plan.where_expr2_eval == None:   # use where filter rows
                         if rela == where_expr1_rela:
                             ans = baseDBDict[where_expr1_rela][row_uu][where_expr1_attr]
-                            tmpEvalS = virtual_plan.where_expr1_eval.replace(virtual_plan.where_expr1_eval[:brkAttrNameIndex], str(ans))
+                            tmpEvalS = virtual_plan.where_expr1_eval.replace(virtual_plan.where_expr1_eval[:brkAttrNameIndex1], str(ans))
                             print(tmpEvalS)
                             if eval(tmpEvalS):
                                 for attr in mpAttr[rela]:
                                     #if attr in baseDBDict[rela][row_uu].keys(): 别判断，让他自动炸了，外面有捕获
                                     mpAttr[rela][attr].append(baseDBDict[rela][row_uu][attr])
                                 row_cnt += 1
+                    else:   # double expr TODO join一起？
+                        print("ww")
+                        pass
 
             # Fill in ret, zip, one table meant to be aligned, no join
             # ret_list_dict = []
