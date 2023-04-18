@@ -1,8 +1,10 @@
 import os
 import glob
 import csv
+import sys
 import dill
 import uuid
+import time
 import logging
 import pickle
 # my parsers
@@ -20,6 +22,8 @@ constraintDict = {}                     # [relation]            -> {primary: att
 
 snapShotInterVal = 2
 tmpSQLLog = []
+
+conditionOptimizerFlag = False
 
 ############################### dev tools, for debug and log ###############################
 # create a formatter that prints ERROR messages in red
@@ -382,7 +386,7 @@ def aggr_row_func(rowList, aggr_func, target_attr):  # row is a list of {'id2sal
     print(rowList)
     ret = rowList[0][target_attr]
     for row in rowList:
-        if aggr_func == "MIN":
+        if aggr_func.upper() == "MIN":
             ret = min(ret, row[target_attr])
     
     return ret
@@ -531,10 +535,11 @@ def mem_exec(sql):
                     #|  1037  |  Alice   |   1037  |   Alice   |
                     #|  122   |  Alice   |   122   |   Alice   |
                     #+--------+----------+---------+-----------+
-                    table = PrettyTable(colNameForPrint)
+                    table4Print = PrettyTable(colNameForPrint)
                     for row in ret_list:
-                        table.add_row(row)
-                        print(table)
+                        table4Print.add_row(row)
+                    print(table4Print)
+                    sys.stdout.flush() # force flushing the output buffer
                 # Time to do group by && having
                 else:   #这种的，记得列名打全了
                     #+--------------+-----------------------+
@@ -567,32 +572,56 @@ def mem_exec(sql):
                     valid_groupAttr_set = set()
                     #having_expr = virtual_plan.having_expr1_eval
                     aggr_func = virtual_plan.having_expr1_eval[:virtual_plan.having_expr1_eval.index('(')] #MIN
+                    if virtual_plan.having_expr2_eval != None:
+                        aggr_func2 = virtual_plan.having_expr2_eval[:virtual_plan.having_expr2_eval.index('(')] #MIN
+                
                     target_attr = virtual_plan.having_expr1_eval[virtual_plan.having_expr1_eval.index('(')+1 : virtual_plan.having_expr1_eval.index(')')]
-                    print(aggr_func, target_attr)
+                    if virtual_plan.having_expr2_eval != None:
+                        target_attr2 = virtual_plan.having_expr2_eval[virtual_plan.having_expr2_eval.index('(')+1 : virtual_plan.having_expr2_eval.index(')')]
+                    
+                    logging.debug("aggr1"+str(aggr_func)+" "+str(target_attr))
+                    if virtual_plan.having_expr2_eval != None:
+                        logging.debug("aggr2"+str(aggr_func2)+" "+str(target_attr2))
+                        logging.debug("having logic is "+str(virtual_plan.having_logic))
+
                     for aggr_attr_value in grpMP.keys():
                         #for rowMP in grpMP[aggr_attr_value]:
                         ans = aggr_row_func(grpMP[aggr_attr_value], aggr_func, target_attr)
                         tmpEvalS = virtual_plan.having_expr1_eval.replace(virtual_plan.having_expr1_eval[:virtual_plan.having_expr1_eval.index(')')+1], str(ans))
                         print(tmpEvalS)
-                        if eval(tmpEvalS):  # 天才？！这是不是就是SQL注入啊？
-                            valid_groupAttr_set.add(aggr_attr_value)
+                        if virtual_plan.having_expr2_eval == None:
+                            if eval(tmpEvalS):  # 天才？！这是不是就是SQL注入啊？
+                                valid_groupAttr_set.add(aggr_attr_value)
+                        else:
+                            ans2 = aggr_row_func(grpMP[aggr_attr_value], aggr_func2, target_attr2)
+                            tmpEvalS2 = virtual_plan.having_expr2_eval.replace(virtual_plan.having_expr2_eval[:virtual_plan.having_expr2_eval.index(')')+1], str(ans2))
+                            logging.debug("conditions: "+ str(tmpEvalS) + str(tmpEvalS2))
+                            if not conditionOptimizerFlag:
+                                if eval(str(eval(tmpEvalS))+" "+virtual_plan.having_logic+" "+str(eval(tmpEvalS2))):
+                                    valid_groupAttr_set.add(aggr_attr_value)
+                            else:   # 条件优化
+                                pass
+
                         #final_list.append(grpMP)
-                    print(valid_groupAttr_set)
+                    logging.debug("valid_groupAttr_set is: " + str(valid_groupAttr_set))
                     
                     table = PrettyTable(colNameForPrint)
 
                     for aggr_attr_value in grpMP.keys():
+                        print("看看", grpMP[aggr_attr_value])
                         if aggr_attr_value in valid_groupAttr_set:
                             tmpList = []
                             for tu in virtual_plan.queryAttr:
+                                print("tu is", tu)
                                 if tu[2] == '': #group by
                                     tmpList.append(aggr_attr_value)
                                 else:   #手动聚合
+                                    print("start argc:", grpMP[aggr_attr_value], tu[2], tu[0]+'.'+tu[1])
                                     tmpList.append(aggr_row_func(grpMP[aggr_attr_value], tu[2], tu[0]+'.'+tu[1]))
                             table.add_row(tmpList)
                    
                     print(table)        
-
+                    sys.stdout.flush()
                 #else:   #has aggr
                 #    pass
             else:   # has where, might utlize indexing
@@ -647,6 +676,7 @@ def engine():
             print("Bye!")
             exit(0)
 
+        st_time = time.time()
         try:
             mem_exec(sql)
         except Exception as e:  # Capture any exception, raise runnable error like primary/foreign here
@@ -657,6 +687,7 @@ def engine():
             tmpSQLLog.clear()
             continue # skip regular persist
         sqlCounter += 1
+        print("Time consumed:",time.time()-st_time,"seconds.")
         # persist
         if sqlCounter % snapShotInterVal == 0:
             #global baseDBDict, BTreeDict, metaDict, constraintDict

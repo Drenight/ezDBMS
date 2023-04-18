@@ -244,7 +244,7 @@ def main():
         SELECT * FROM A LEFT JOIN B ON 1=1;
     """
     sql4 = """
-        SELECT min(id2salary.id), min(id2salary.salary) FROM id2salary GROUP BY id2salary.id HAVING MIN(id2salary.salary)>=1500 AND MIN(id2salary.salary)=2700;
+        SELECT min(id2salary.id), min(id2salary.salary) FROM id2salary GROUP BY id2salary.id HAVING MIN(id2salary.salary)>=1500 AND MIN(id2salary.salary)<2000;
     """
     sql5 = """
         SELECT id2salary.id, MIN(id2salary.salary) FROM id2salary GROUP BY id2salary.id HAVING MIN(id2salary.salary)>=1500;
