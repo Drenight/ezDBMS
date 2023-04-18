@@ -28,19 +28,22 @@ class SelectPlan:
         self.queryAttr = []         # standard as (relaName, attr, min)
         #self.rela2attr = {}         # rela -> tuple of attr
         self.table_name = None 
-        self.Where = False
+
         self.Aggr  = False
         self.Join  = False
 
-        self.Group = False
-        self.group_attr = None
+        self.where_expr = None
+        self.where_logic = None
+        self.where_expr1_eval = None   # MIN(ptr.id) >= 3700
+        self.where_expr2_eval = None   # MIN(ptr.name) == 'Alice'
 
-        self.Having = False
         self.having_expr = None
         self.having_logic = None        # "AND".lower()
         self.having_expr1_eval = None   # MIN(ptr.id) >= 3700
-
         self.having_expr2_eval = None   # MIN(ptr.name) == 'Alice'
+
+        self.Group = False
+        self.group_attr = None
 
         self.orderBy = None
         self.limit = None
@@ -116,6 +119,35 @@ class SelectListener(SQLiteParserListener):
             if s2 != None and '!' not in s2 and '<' not in s2 and '>' not in s2 and '=' in s2:
                 self.plan.having_expr2_eval = self.plan.having_expr2_eval.replace('=', '==')
         # having done?
+
+        # get where
+        if ctx.whereExpr != None:
+            print(ctx.whereExpr.getText())
+            self.plan.where_expr = ctx.whereExpr.getText()
+            whereExprCtx = ctx.whereExpr
+            if str(whereExprCtx.AND_()) == 'AND':
+                self.plan.where_logic = 'and'
+            elif str(whereExprCtx.OR_()) == 'OR':
+                self.plan.where_logic = 'or'
+
+            print(self.plan.where_logic)
+
+            if self.plan.where_logic != None:
+                self.plan.where_expr1_eval = self.plan.where_expr[:self.plan.where_expr.index(self.plan.where_logic.upper())]
+                self.plan.where_expr2_eval = self.plan.where_expr[self.plan.where_expr.index(self.plan.where_logic.upper())+len(self.plan.where_logic):]
+            else:
+                self.plan.where_expr1_eval = self.plan.where_expr
+                self.plan.where_expr2_eval = None 
+            # = -> ==   
+            s1 = self.plan.where_expr1_eval
+            s2 = self.plan.where_expr2_eval
+            print(s1,s2)
+            if '!' not in s1 and '<' not in s1 and '>' not in s1 and '=' in s1:
+                self.plan.where_expr1_eval = self.plan.where_expr1_eval.replace('=', '==')
+            if s2 != None and '!' not in s2 and '<' not in s2 and '>' not in s2 and '=' in s2:
+                self.plan.where_expr2_eval = self.plan.where_expr2_eval.replace('=', '==')
+            print(self.plan.where_expr1_eval)
+        # where done?
 
         # get join, if join table_or_subquery==[]
         joinCtx = ctx.join_clause()
@@ -249,8 +281,17 @@ def main():
     sql5 = """
         SELECT id2salary.id, MIN(id2salary.salary) FROM id2salary GROUP BY id2salary.id HAVING MIN(id2salary.salary)>=1500;
     """
+    sql6 = """
+        SELECT min(id2salary.id), min(id2salary.salary) FROM id2salary GROUP BY id2salary.id HAVING MIN(id2salary.salary)>=1500 OR MIN(id2salary.salary)<2000;
+    """
+    sql7 = """
+        SELECT * FROM id2salary WHERE id2salary.salary>=1500;
+    """
+    sql8 = """
+        SELECT * FROM id2salary WHERE id2salary.salary=1500 AND id2salary.id=707;
+    """
 
-    input_stream = InputStream(sql5)
+    input_stream = InputStream(sql7)
     lexer = SQLiteLexer(input_stream)
     token_stream = CommonTokenStream(lexer)
     parser = SQLiteParser(token_stream)
