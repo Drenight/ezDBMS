@@ -571,7 +571,6 @@ def mem_exec(sql):
                             ans1_where_no_join = baseDBDict[where_expr1_rela][row_uu][where_expr1_attr]
                         if rela_now == where_expr2_rela:
                             ans2_where_no_join = baseDBDict[where_expr2_rela][row_uu][where_expr2_attr]
-                        
                         if ans1_where_no_join != "True":
                             tmpEvalS1 = virtual_plan.where_expr1_eval.replace(virtual_plan.where_expr1_eval[:brkAttrNameIndex1], str(ans1_where_no_join))
                         else:
@@ -604,6 +603,9 @@ def mem_exec(sql):
                         join_attr1 = left[left.index('.')+1:]
                         #join_rela2 = right[:right.index('.')]
                         join_attr2 = right[right.index('.')+1:]
+
+                        logging.debug("logic: "+logic+" left: "+left+" right: "+right)
+
                         if join_rela1 == rela1:
                             ans1 = baseDBDict[rela1][uu1][join_attr1]
                             ans2 = baseDBDict[rela2][uu2][join_attr2]
