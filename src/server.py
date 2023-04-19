@@ -363,7 +363,7 @@ def create_foreign(relationName, attr, rela2, attr2):
         pass
     if metaDict[rela2][attr2] != metaDict[relationName][attr]:
         pass
-    if "foreign" in constraintDict[relationName].keys():
+    if "foreign" in constraintDict[relationName].keys():    #TODO ???用吗
         raise ForeignKeyError(f"{relationName} already has a foreign key.")
     else:
         constraintDict[relationName].setdefault("foreign", {})
@@ -380,10 +380,6 @@ def read_sql():
         else:
             sql += line + " "
     return sql
-
-class aggrAffi:
-    minFlag = False
-    nowMin = None
 
 def aggr_row_func(rowList, aggr_func, target_attr):  # row is a list of {'id2salary.id': 909, 'id2salary.salary': 2000}
     print(rowList)
