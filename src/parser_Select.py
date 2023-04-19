@@ -191,7 +191,8 @@ class SelectListener(SQLiteParserListener):
                 expr = joinCons.expr().getText()
                 if '!' not in expr and '<' not in expr and '>' not in expr and '=' in expr:
                     self.plan.join_expr_eval = expr.replace('=', '==')
-                print("expr is", self.plan.join_expr_eval)
+                else:   #多捞哦，这给忘了
+                    self.plan.join_expr_eval = expr
 
         return super().enterSelect_core(ctx)    
 
@@ -304,7 +305,7 @@ def main():
         SELECT min(id2salary.id), min(id2salary.salary) FROM id2salary WHERE id2salary.id=707 AND id2salary.salary>=1000 GROUP BY id2salary.id HAVING MIN(id2salary.salary)>=1500 OR MIN(id2salary.salary)<2000;
     """
     sql10 = """
-        SELECT ptr.id, ptr.name, id2salary.salary FROM ptr INNER JOIN id2salary ON id2salary.id = ptr.id WHERE ptr.id>=300 AND id2salary.salary<7000;
+        SELECT ptr.id, id2salary.id, ptr.name, id2salary.salary FROM ptr INNER JOIN id2salary ON ptr.id <= id2salary.id WHERE ptr.id>=300 AND id2salary.salary<7000;
     """
 
     input_stream = InputStream(sql10)
