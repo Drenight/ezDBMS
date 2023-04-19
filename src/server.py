@@ -1,12 +1,13 @@
+import re
 import os
-import glob
 import csv
 import sys
+import glob
 import dill
 import uuid
 import time
-import logging
 import pickle
+import logging
 # my parsers
 import parser_CreateTable
 import parser_Insert
@@ -25,6 +26,7 @@ snapShotInterVal = 2
 tmpSQLLog = []
 
 conditionOptimizerFlag = False
+joinOptimizerFlag = False
 
 ############################### dev tools, for debug and log ###############################
 # create a formatter that prints ERROR messages in red
@@ -443,236 +445,346 @@ def mem_exec(sql):
         # 不支持重复列了吧，麻烦死了，重复列
         virtual_plan = parser_Select.virtual_plan_create(sql)
         logging.debug("virtual plan done, it's like: " + str(virtual_plan.__dict__))
-        if not virtual_plan.Join:
-            # 重复列的冗余优化？考虑删了
-            mpAttr = {}
-            for tu in virtual_plan.queryAttr:
-                rela = tu[0]
-                if rela == 'special_WHERE':
-                    rela = virtual_plan.table_name
-                if rela not in mpAttr.keys():
-                    mpAttr.setdefault(rela,{})
-                if tu[1] == '*':
-                    for attr in metaDict[rela].keys():
-                        if attr not in mpAttr[rela].keys():
-                            mpAttr[rela].setdefault(attr, [])
-                else:
-                    if tu[1] not in mpAttr[rela].keys():
-                        mpAttr[rela].setdefault(tu[1], [])
-            logging.debug("mpAttr is like:" + str(mpAttr))
-            
-            # Start linear scanning...
-            if virtual_plan.where_expr != None:
-                brkRelaNameIndex1 = 0
-                brkRelaNameIndex2 = 0
-                brkAttrNameIndex1 = 0
-                brkAttrNameIndex2 = 0
 
-                for ch in virtual_plan.where_expr1_eval:
+        # 重复列的冗余优化？考虑删了
+        mpAttr = {}
+        for tu in virtual_plan.queryAttr:
+            rela = tu[0]
+            if rela == 'special_WHERE':
+                rela = virtual_plan.table_name
+            if rela not in mpAttr.keys():
+                mpAttr.setdefault(rela,{})
+            if tu[1] == '*':
+                for attr in metaDict[rela].keys():
+                    if attr not in mpAttr[rela].keys():
+                        mpAttr[rela].setdefault(attr, [])
+            else:
+                if tu[1] not in mpAttr[rela].keys():
+                    mpAttr[rela].setdefault(tu[1], [])
+        logging.debug("mpAttr is like:" + str(mpAttr))
+        
+        # Start linear scanning...
+        if virtual_plan.where_expr != None:
+            brkRelaNameIndex1 = 0
+            brkRelaNameIndex2 = 0
+            brkAttrNameIndex1 = 0
+            brkAttrNameIndex2 = 0
+
+            for ch in virtual_plan.where_expr1_eval:
+                if not ch.isalnum() and ch=='.':
+                    brkRelaNameIndex1 = brkAttrNameIndex1
+                if not ch.isalnum() and ch!='.':
+                    break
+                brkAttrNameIndex1 += 1
+            if virtual_plan.where_expr2_eval != None:
+                for ch in virtual_plan.where_expr2_eval:
                     if not ch.isalnum() and ch=='.':
-                        brkRelaNameIndex1 = brkAttrNameIndex1
+                        brkRelaNameIndex2 = brkAttrNameIndex2
                     if not ch.isalnum() and ch!='.':
                         break
-                    brkAttrNameIndex1 += 1
-                if virtual_plan.where_expr2_eval != None:
-                    for ch in virtual_plan.where_expr2_eval:
-                        if not ch.isalnum() and ch=='.':
-                            brkRelaNameIndex2 = brkAttrNameIndex2
-                        if not ch.isalnum() and ch!='.':
-                            break
-                        brkAttrNameIndex2 += 1
+                    brkAttrNameIndex2 += 1
 
-                where_expr1_rela = virtual_plan.where_expr1_eval[:brkRelaNameIndex1]
-                where_expr1_attr = virtual_plan.where_expr1_eval[brkRelaNameIndex1+1:brkAttrNameIndex1]
-                logging.debug("First where expr rela&attr is "+str(where_expr1_rela)+"&"+str(where_expr1_attr))
-                if virtual_plan.where_expr2_eval != None:
-                    where_expr2_rela = virtual_plan.where_expr2_eval[:brkRelaNameIndex2]
-                    where_expr2_attr = virtual_plan.where_expr2_eval[brkRelaNameIndex2+1:brkAttrNameIndex2]
-                    logging.debug("Second where expr rela&attr is "+str(where_expr2_rela)+"&"+str(where_expr2_attr))
-                #ans = baseDBDict[rela][row_uu][where_expr1_attr]
+            where_expr1_rela = virtual_plan.where_expr1_eval[:brkRelaNameIndex1]
+            where_expr1_attr = virtual_plan.where_expr1_eval[brkRelaNameIndex1+1:brkAttrNameIndex1]
+            logging.debug("First where expr rela&attr is "+str(where_expr1_rela)+"&"+str(where_expr1_attr))
+            if virtual_plan.where_expr2_eval != None:
+                where_expr2_rela = virtual_plan.where_expr2_eval[:brkRelaNameIndex2]
+                where_expr2_attr = virtual_plan.where_expr2_eval[brkRelaNameIndex2+1:brkAttrNameIndex2]
+                logging.debug("Second where expr rela&attr is "+str(where_expr2_rela)+"&"+str(where_expr2_attr))
+            #ans = baseDBDict[rela][row_uu][where_expr1_attr]
 
-            row_cnt = 0
-            for rela in mpAttr.keys():
-                for row_uu in baseDBDict[rela]:
-                    if virtual_plan.where_expr == None:
+        row_cnt = 0
+        
+        rela_list = list(mpAttr.keys())
+        rela = rela_list[0]#for rela in mpAttr.keys():  # 就一个或者两个吧？？
+        if virtual_plan.join_expr_eval == None: #tested
+            for row_uu in baseDBDict[rela]: #线性扫描，TODO 索引直接拉where后的数据       
+                if virtual_plan.where_expr == None:
+                    for attr in mpAttr[rela]:
+                    #if attr in baseDBDict[rela][row_uu].keys(): 别判断，让他自动炸了，外面有捕获
+                        mpAttr[rela][attr].append(baseDBDict[rela][row_uu][attr])
+                    row_cnt += 1
+                elif virtual_plan.where_expr2_eval == None:   # use where filter rows
+                    #if rela == where_expr1_rela: 不用了吧，join分类后
+                    ans = baseDBDict[where_expr1_rela][row_uu][where_expr1_attr]
+                    tmpEvalS = virtual_plan.where_expr1_eval.replace(virtual_plan.where_expr1_eval[:brkAttrNameIndex1], str(ans))
+                    print(tmpEvalS)
+                    if eval(tmpEvalS):
                         for attr in mpAttr[rela]:
-                        #if attr in baseDBDict[rela][row_uu].keys(): 别判断，让他自动炸了，外面有捕获
                             mpAttr[rela][attr].append(baseDBDict[rela][row_uu][attr])
                         row_cnt += 1
+                else:   # double expr && no join
+                    ans1_where_no_join = baseDBDict[where_expr1_rela][row_uu][where_expr1_attr]
+                    ans2_where_no_join = baseDBDict[where_expr2_rela][row_uu][where_expr2_attr]
+                    tmpEvalS1 = virtual_plan.where_expr1_eval.replace(virtual_plan.where_expr1_eval[:brkAttrNameIndex1], str(ans1_where_no_join))
+                    tmpEvalS2 = virtual_plan.where_expr2_eval.replace(virtual_plan.where_expr2_eval[:brkAttrNameIndex2], str(ans2_where_no_join))
+                    logging.debug("ok double where without join: "+str(tmpEvalS1)+" "+str(tmpEvalS2))
+                    if eval(str(eval(tmpEvalS1))+" "+str(virtual_plan.where_logic)+" "+str(eval(tmpEvalS2))):
+                        for attr in mpAttr[rela]:
+                            mpAttr[rela][attr].append(baseDBDict[rela][row_uu][attr])
+                        row_cnt += 1
+        else:   #join, 叉积新表
+            # 1. test row_uu and row_uu2 for where
+            # 2. test join_expr
+            rela1 = rela_list[0]
+            rela2 = rela_list[1]
+            rela_tmp_list = [rela1, rela2]
+
+            join_uu_list1 = []
+            join_uu_list2 = []
+            row_cnt1 = 0
+            row_cnt2 = 0
+            logging.debug("join epxr " + str(virtual_plan.join_expr_eval))
+
+            for rela_now in rela_tmp_list:
+                for row_uu in baseDBDict[rela_now]:
+                    if virtual_plan.where_expr == None:
+                        if rela_now == rela1: 
+                            join_uu_list1.append(row_uu)
+                            row_cnt1 += 1
+                        else:
+                            join_uu_list2.append(row_uu)
+                            row_cnt2 += 1
                     elif virtual_plan.where_expr2_eval == None:   # use where filter rows
-                        if rela == where_expr1_rela:
+                        if rela_now != where_expr1_rela:
+                            if rela_now == rela1: 
+                                join_uu_list1.append(row_uu)
+                                row_cnt1 += 1
+                            else:
+                                join_uu_list2.append(row_uu)
+                                row_cnt2 += 1
+                        else:
                             ans = baseDBDict[where_expr1_rela][row_uu][where_expr1_attr]
                             tmpEvalS = virtual_plan.where_expr1_eval.replace(virtual_plan.where_expr1_eval[:brkAttrNameIndex1], str(ans))
-                            print(tmpEvalS)
+                            print("tmpEvalS at join one where", tmpEvalS)
                             if eval(tmpEvalS):
-                                for attr in mpAttr[rela]:
-                                    #if attr in baseDBDict[rela][row_uu].keys(): 别判断，让他自动炸了，外面有捕获
-                                    mpAttr[rela][attr].append(baseDBDict[rela][row_uu][attr])
-                                row_cnt += 1
-                    else:   # double expr TODO join一起？
-                        print("ww")
-                        pass
-
-            # Fill in ret, zip, one table meant to be aligned, no join
-            # ret_list_dict = []
-            for iter in range(row_cnt):
-                tmpLst = []
-                tmpDict = {}
-                for tu in virtual_plan.queryAttr:
-                    rela = tu[0]
-                    if rela == 'special_WHERE':
-                        rela = virtual_plan.table_name
-                    if tu[1] == '*':
-                        for attr in metaDict[rela].keys():
-                            now_entry = mpAttr[rela][attr][iter]
-                            tmpLst.append(now_entry)
-                            com_attr = rela+"."+attr
-                            if com_attr not in tmpDict.keys():
-                                tmpDict.setdefault(com_attr, now_entry)
+                                if rela_now == rela1: 
+                                    join_uu_list1.append(row_uu)
+                                    row_cnt1 += 1
+                                else:
+                                    join_uu_list2.append(row_uu)
+                                    row_cnt2 += 1
+                    else:   # double expr
+                        ans1_where_no_join = "True"
+                        ans2_where_no_join = "True"
+                        if rela_now == where_expr1_rela:
+                            ans1_where_no_join = baseDBDict[where_expr1_rela][row_uu][where_expr1_attr]
+                        if rela_now == where_expr2_rela:
+                            ans2_where_no_join = baseDBDict[where_expr2_rela][row_uu][where_expr2_attr]
+                        
+                        if ans1_where_no_join != "True":
+                            tmpEvalS1 = virtual_plan.where_expr1_eval.replace(virtual_plan.where_expr1_eval[:brkAttrNameIndex1], str(ans1_where_no_join))
+                        else:
+                            tmpEvalS1 = "True"
+                        if ans2_where_no_join != "True":
+                            tmpEvalS2 = virtual_plan.where_expr2_eval.replace(virtual_plan.where_expr2_eval[:brkAttrNameIndex2], str(ans2_where_no_join))
+                        else:
+                            tmpEvalS2 = "True"
+                        logging.debug("ok double where without join: "+str(tmpEvalS1)+" "+str(tmpEvalS2))
+                        if eval(str(eval(tmpEvalS1))+" "+str(virtual_plan.where_logic)+" "+str(eval(tmpEvalS2))):
+                            if rela_now == rela1: 
+                                join_uu_list1.append(row_uu)
+                                row_cnt1 += 1
                             else:
-                                # TODO check
-                                logging.warning("Weird path, check please.")
-                    else:
-                        now_entry = mpAttr[rela][tu[1]][iter]
-                        tmpLst.append(now_entry)
-                        com_attr = rela+"."+tu[1]
-                        if com_attr not in tmpDict.keys():
-                            tmpDict.setdefault(com_attr, now_entry)
-                ret_list.append(tmpLst)
-                ret_list_dict.append(tmpDict)
+                                join_uu_list2.append(row_uu)
+                                row_cnt2 += 1
             
-            logging.debug("ret_list_dict"+str(ret_list_dict))
+            logging.debug("join_uu_list1: " + str(join_uu_list1))
+            logging.debug("join_uu_list2: " + str(join_uu_list2))
+            # last, filter pairs
+            if not joinOptimizerFlag:
+                for uu1 in join_uu_list1:
+                    for uu2 in join_uu_list2:
+                        join_expr = virtual_plan.join_expr_eval
+                        match = re.search("(<=|>=|==|!=|<|>)", join_expr)
+                        logic = match.group()
+                        left, right = join_expr.split(logic)
+                        #print(left, symbol, right) id2salary.id == ptr.id
+                        join_rela1 = left[:left.index('.')]
+                        join_attr1 = left[left.index('.')+1:]
+                        #join_rela2 = right[:right.index('.')]
+                        join_attr2 = right[right.index('.')+1:]
+                        if join_rela1 == rela1:
+                            ans1 = baseDBDict[rela1][uu1][join_attr1]
+                            ans2 = baseDBDict[rela2][uu2][join_attr2]
+                        else:
+                            ans1 = baseDBDict[rela2][uu2][join_attr2]
+                            ans2 = baseDBDict[rela1][uu1][join_attr1]
+                        tmpSEval = str(ans1)+logic+str(ans2)
+                        #logging.debug()
+                        if eval(tmpSEval):
+                            for relaTMP in mpAttr.keys():
+                                for attr in mpAttr[relaTMP]:
+                                    if relaTMP == rela1:
+                                        mpAttr[relaTMP][attr].append(baseDBDict[relaTMP][uu1][attr])
+                                    else:
+                                        mpAttr[relaTMP][attr].append(baseDBDict[relaTMP][uu2][attr])
+                            row_cnt += 1
+        
+        logging.debug("After filling, mpAttr is like: " + str(mpAttr))
 
-            # Time to print results
-            print("By linear scaning, query done, result as follows:")
-            colNameForPrint = []
-            colNameSet = set()  # interesting point, PrettyTable bans duplicate field names
+        print(row_cnt)
 
-            # 重复列trick，进dict不准备沿用了，太难维护
+        # aggr_func = virtual_plan.having_expr1_eval[:virtual_plan.having_expr1_eval.index('(')] #MIN
+
+        # Fill in ret, zip, one table meant to be aligned, no join
+        # ret_list_dict = []
+        for iter in range(row_cnt):
+            tmpLst = []
+            tmpDict = {}
             for tu in virtual_plan.queryAttr:
                 rela = tu[0]
                 if rela == 'special_WHERE':
                     rela = virtual_plan.table_name
                 if tu[1] == '*':
                     for attr in metaDict[rela].keys():
-                        col = str(rela)+'.'+str(attr)
-                        if tu[2] != "":
-                            col = tu[2]+'('+col+')'
-                        while col in colNameSet:        # trick
-                            logging.debug("making more longer name for PrettyTable")
-                            col = col+" "
-                        colNameSet.add(col)
-                        colNameForPrint.append(col)
+                        now_entry = mpAttr[rela][attr][iter]
+                        tmpLst.append(now_entry)
+                        com_attr = rela+"."+attr
+                        if com_attr not in tmpDict.keys():
+                            tmpDict.setdefault(com_attr, now_entry)
+                        else:
+                            # TODO check
+                            logging.warning("Weird path, check please.")
                 else:
-                    col = str(rela)+'.'+str(tu[1])
+                    now_entry = mpAttr[rela][tu[1]][iter]
+                    tmpLst.append(now_entry)
+                    com_attr = rela+"."+tu[1]
+                    if com_attr not in tmpDict.keys():
+                        tmpDict.setdefault(com_attr, now_entry)
+            ret_list.append(tmpLst)
+            ret_list_dict.append(tmpDict)
+        
+        logging.debug("ret_list_dict"+str(ret_list_dict))
+
+        # Time to print results
+        print("By linear scaning, query done, result as follows:")
+        colNameForPrint = []
+        colNameSet = set()  # interesting point, PrettyTable bans duplicate field names
+
+        # 重复列trick，进dict不准备沿用了，太难维护
+        for tu in virtual_plan.queryAttr:
+            rela = tu[0]
+            if rela == 'special_WHERE':
+                rela = virtual_plan.table_name
+            if tu[1] == '*':
+                for attr in metaDict[rela].keys():
+                    col = str(rela)+'.'+str(attr)
                     if tu[2] != "":
                         col = tu[2]+'('+col+')'
-                    while col in colNameSet:
+                    while col in colNameSet:        # trick
                         logging.debug("making more longer name for PrettyTable")
                         col = col+" "
                     colNameSet.add(col)
                     colNameForPrint.append(col)
+            else:
+                col = str(rela)+'.'+str(tu[1])
+                if tu[2] != "":
+                    col = tu[2]+'('+col+')'
+                while col in colNameSet:
+                    logging.debug("making more longer name for PrettyTable")
+                    col = col+" "
+                colNameSet.add(col)
+                colNameForPrint.append(col)
 
-            # no group by, just print
-            if not virtual_plan.Aggr:
-                # Basic linear scan, done
-                #+--------+----------+---------+-----------+
-                #| ptr.id | ptr.name | ptr.id  | ptr.name  |
-                #+--------+----------+---------+-----------+
-                #|  707   |   Bob    |   707   |    Bob    |
-                #|  1037  |  Alice   |   1037  |   Alice   |
-                #|  122   |  Alice   |   122   |   Alice   |
-                #+--------+----------+---------+-----------+
-                table4Print = PrettyTable(colNameForPrint)
-                for row in ret_list:
-                    table4Print.add_row(row)
-                print(table4Print)
-                sys.stdout.flush() # force flushing the output buffer
-            # Time to do group by && having
-            else:   #这种的，记得列名打全了
-                #+--------------+-----------------------+
-                #| id2salary.id | MIN(id2salary.salary) |
-                #+--------------+-----------------------+
-                #|     909      |          2000         |
-                #|     707      |          1500         |
-                #+--------------+-----------------------+
-                logging.info("dict ver: " + str(ret_list_dict))
-                grpMP = {}
-                for row_uu in baseDBDict[rela]:                    
-                    for attr in mpAttr[rela]:
-                        #if attr in baseDBDict[rela][row_uu].keys(): 别判断，让他自动炸了，外面有捕获
-                        mpAttr[rela][attr].append(baseDBDict[rela][row_uu][attr])
-                    row_cnt += 1    
+        # no group by, just print
+        if not virtual_plan.Aggr:
+            # Basic linear scan, done
+            #+--------+----------+---------+-----------+
+            #| ptr.id | ptr.name | ptr.id  | ptr.name  |
+            #+--------+----------+---------+-----------+
+            #|  707   |   Bob    |   707   |    Bob    |
+            #|  1037  |  Alice   |   1037  |   Alice   |
+            #|  122   |  Alice   |   122   |   Alice   |
+            #+--------+----------+---------+-----------+
+            table4Print = PrettyTable(colNameForPrint)
+            for row in ret_list:
+                table4Print.add_row(row)
+            print(table4Print)
+            sys.stdout.flush() # force flushing the output buffer
+        # Time to do group by && having
+        else:   #这种的，记得列名打全了
+            #+--------------+-----------------------+
+            #| id2salary.id | MIN(id2salary.salary) |
+            #+--------------+-----------------------+
+            #|     909      |          2000         |
+            #|     707      |          1500         |
+            #+--------------+-----------------------+
+            logging.info("dict ver: " + str(ret_list_dict))
+            grpMP = {}
+            for row_uu in baseDBDict[rela]:                    
+                for attr in mpAttr[rela]:
+                    #if attr in baseDBDict[rela][row_uu].keys(): 别判断，让他自动炸了，外面有捕获
+                    mpAttr[rela][attr].append(baseDBDict[rela][row_uu][attr])
+                row_cnt += 1    
 
-                for rowMP in ret_list_dict:
-                    #print("GROUP", row, virtual_plan.group_attr, virtual_plan.having_expr)
-                    # TODO 矩阵里，哪一列是group_attr？
-                    # zip时候另缝一个字典版本？一份表当然可以重用mpAttr，但兼容join的话还是让新表重新生成一个字典版本比较好？
-                    if rowMP[virtual_plan.group_attr] not in grpMP.keys():
-                        grpMP.setdefault(rowMP[virtual_plan.group_attr], [])
-                    grpMP[rowMP[virtual_plan.group_attr]].append(rowMP)
-                    #grpMP[virtual_plan.group_attr].append()
+            for rowMP in ret_list_dict:
+                #print("GROUP", row, virtual_plan.group_attr, virtual_plan.having_expr)
+                # TODO 矩阵里，哪一列是group_attr？
+                # zip时候另缝一个字典版本？一份表当然可以重用mpAttr，但兼容join的话还是让新表重新生成一个字典版本比较好？
+                if rowMP[virtual_plan.group_attr] not in grpMP.keys():
+                    grpMP.setdefault(rowMP[virtual_plan.group_attr], [])
+                grpMP[rowMP[virtual_plan.group_attr]].append(rowMP)
+                #grpMP[virtual_plan.group_attr].append()
 
-                print("grouping done, now grpMP is:", grpMP) 
-                # grouping done, now grpMP is: {909: [{'id2salary.id': 909, 'id2salary.salary': 2000}], 707: [{'id2salary.id': 707, 'id2salary.salary': 2000}, {'id2salary.id': 707, 'id2salary.salary': 1500}]}
+            print("grouping done, now grpMP is:", grpMP) 
+            # grouping done, now grpMP is: {909: [{'id2salary.id': 909, 'id2salary.salary': 2000}], 707: [{'id2salary.id': 707, 'id2salary.salary': 2000}, {'id2salary.id': 707, 'id2salary.salary': 1500}]}
 
-                # Filter by having
-                valid_groupAttr_set = set()
-                #having_expr = virtual_plan.having_expr1_eval
-                aggr_func = virtual_plan.having_expr1_eval[:virtual_plan.having_expr1_eval.index('(')] #MIN
-                if virtual_plan.having_expr2_eval != None:
-                    aggr_func2 = virtual_plan.having_expr2_eval[:virtual_plan.having_expr2_eval.index('(')] #MIN
+            # Filter by having
+            valid_groupAttr_set = set()
+            #having_expr = virtual_plan.having_expr1_eval
+            aggr_func = virtual_plan.having_expr1_eval[:virtual_plan.having_expr1_eval.index('(')] #MIN
+            if virtual_plan.having_expr2_eval != None:
+                aggr_func2 = virtual_plan.having_expr2_eval[:virtual_plan.having_expr2_eval.index('(')] #MIN
+        
+            target_attr = virtual_plan.having_expr1_eval[virtual_plan.having_expr1_eval.index('(')+1 : virtual_plan.having_expr1_eval.index(')')]
+            if virtual_plan.having_expr2_eval != None:
+                target_attr2 = virtual_plan.having_expr2_eval[virtual_plan.having_expr2_eval.index('(')+1 : virtual_plan.having_expr2_eval.index(')')]
             
-                target_attr = virtual_plan.having_expr1_eval[virtual_plan.having_expr1_eval.index('(')+1 : virtual_plan.having_expr1_eval.index(')')]
-                if virtual_plan.having_expr2_eval != None:
-                    target_attr2 = virtual_plan.having_expr2_eval[virtual_plan.having_expr2_eval.index('(')+1 : virtual_plan.having_expr2_eval.index(')')]
-                
-                logging.debug("aggr1"+str(aggr_func)+" "+str(target_attr))
-                if virtual_plan.having_expr2_eval != None:
-                    logging.debug("aggr2"+str(aggr_func2)+" "+str(target_attr2))
-                    logging.debug("having logic is "+str(virtual_plan.having_logic))
+            logging.debug("aggr1"+str(aggr_func)+" "+str(target_attr))
+            if virtual_plan.having_expr2_eval != None:
+                logging.debug("aggr2"+str(aggr_func2)+" "+str(target_attr2))
+                logging.debug("having logic is "+str(virtual_plan.having_logic))
 
-                for aggr_attr_value in grpMP.keys():
-                    #for rowMP in grpMP[aggr_attr_value]:
-                    ans = aggr_row_func(grpMP[aggr_attr_value], aggr_func, target_attr)
-                    tmpEvalS = virtual_plan.having_expr1_eval.replace(virtual_plan.having_expr1_eval[:virtual_plan.having_expr1_eval.index(')')+1], str(ans))
-                    print(tmpEvalS)
-                    if virtual_plan.having_expr2_eval == None:
-                        if eval(tmpEvalS):  # 天才？！这是不是就是SQL注入啊？
+            for aggr_attr_value in grpMP.keys():
+                #for rowMP in grpMP[aggr_attr_value]:
+                ans = aggr_row_func(grpMP[aggr_attr_value], aggr_func, target_attr)
+                tmpEvalS = virtual_plan.having_expr1_eval.replace(virtual_plan.having_expr1_eval[:virtual_plan.having_expr1_eval.index(')')+1], str(ans))
+                print(tmpEvalS)
+                if virtual_plan.having_expr2_eval == None:
+                    if eval(tmpEvalS):  # 天才？！这是不是就是SQL注入啊？
+                        valid_groupAttr_set.add(aggr_attr_value)
+                else:
+                    ans2 = aggr_row_func(grpMP[aggr_attr_value], aggr_func2, target_attr2)
+                    tmpEvalS2 = virtual_plan.having_expr2_eval.replace(virtual_plan.having_expr2_eval[:virtual_plan.having_expr2_eval.index(')')+1], str(ans2))
+                    logging.debug("conditions: "+ str(tmpEvalS) + str(tmpEvalS2))
+                    if not conditionOptimizerFlag:
+                        if eval(str(eval(tmpEvalS))+" "+virtual_plan.having_logic+" "+str(eval(tmpEvalS2))):
                             valid_groupAttr_set.add(aggr_attr_value)
-                    else:
-                        ans2 = aggr_row_func(grpMP[aggr_attr_value], aggr_func2, target_attr2)
-                        tmpEvalS2 = virtual_plan.having_expr2_eval.replace(virtual_plan.having_expr2_eval[:virtual_plan.having_expr2_eval.index(')')+1], str(ans2))
-                        logging.debug("conditions: "+ str(tmpEvalS) + str(tmpEvalS2))
-                        if not conditionOptimizerFlag:
-                            if eval(str(eval(tmpEvalS))+" "+virtual_plan.having_logic+" "+str(eval(tmpEvalS2))):
-                                valid_groupAttr_set.add(aggr_attr_value)
-                        else:   # 条件优化
-                            pass
+                    else:   # 条件优化
+                        pass
 
-                    #final_list.append(grpMP)
-                logging.debug("valid_groupAttr_set is: " + str(valid_groupAttr_set))
-                
-                table = PrettyTable(colNameForPrint)
+                #final_list.append(grpMP)
+            logging.debug("valid_groupAttr_set is: " + str(valid_groupAttr_set))
+            
+            table = PrettyTable(colNameForPrint)
 
-                for aggr_attr_value in grpMP.keys():
-                    if aggr_attr_value in valid_groupAttr_set:
-                        tmpList = []
-                        for tu in virtual_plan.queryAttr:
-                            print("tu is", tu)
-                            if tu[2] == '': #group by
-                                tmpList.append(aggr_attr_value)
-                            else:   #手动聚合
-                                print("start argc:", grpMP[aggr_attr_value], tu[2], tu[0]+'.'+tu[1])
-                                tmpList.append(aggr_row_func(grpMP[aggr_attr_value], tu[2], tu[0]+'.'+tu[1]))
-                        table.add_row(tmpList)
-                
-                print(table)        
-                sys.stdout.flush()
-            #else:   #has aggr
-            #    pass
-        else:   # has join
-            pass
+            for aggr_attr_value in grpMP.keys():
+                if aggr_attr_value in valid_groupAttr_set:
+                    tmpList = []
+                    for tu in virtual_plan.queryAttr:
+                        print("tu is", tu)
+                        if tu[2] == '': #group by
+                            tmpList.append(aggr_attr_value)
+                        else:   #手动聚合
+                            print("start argc:", grpMP[aggr_attr_value], tu[2], tu[0]+'.'+tu[1])
+                            tmpList.append(aggr_row_func(grpMP[aggr_attr_value], tu[2], tu[0]+'.'+tu[1]))
+                    table.add_row(tmpList)
+            
+            print(table)        
+            sys.stdout.flush()
+        #else:   #has aggr
+        #    pass
 
     # basic demo
     if int(op) == 0:      # 0 test_table id int name str

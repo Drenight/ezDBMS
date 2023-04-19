@@ -56,8 +56,11 @@ def virtual_plan_create(sql):
 
 def main():
     sql = """
-        INSERT INTO ptr AS ptr_ex (id, name)
+        INSERT INTO ptr (id, name)
         VALUES (122, 'Alice');
+    """
+    sql2 = """
+        INSERT INTO ptr (id,name) VALUES (909,'Alice');
     """
 
     input_stream = InputStream(sql)
