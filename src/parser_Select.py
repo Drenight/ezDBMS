@@ -42,6 +42,11 @@ class SelectPlan:
         self.having_expr1_eval = None   # MIN(ptr.id) >= 3700
         self.having_expr2_eval = None   # MIN(ptr.name) == 'Alice'
 
+        self.joinRela1 = None
+        self.joinRela2 = None
+        self.joinOP = None      # INNER
+        self.join_expr_eval = None
+ 
         self.Group = False
         self.group_attr = None
 
@@ -80,9 +85,9 @@ class SelectListener(SQLiteParserListener):
             self.plan.txtAttrs.append(attr)
         logging.debug(self.plan.txtAttrs)
 
-        # get from's relation
+        # get from's relation, join不会进
         if ctx.table_or_subquery() != []:
-            fromCtx = ctx.table_or_subquery()[0]        # 单表，其他都在join_clause解
+            fromCtx = ctx.table_or_subquery()[0]
             tableName = fromCtx.table_name().getText()
             self.plan.table_name = tableName
             logging.debug("from table is:" + str(tableName))
@@ -173,6 +178,9 @@ class SelectListener(SQLiteParserListener):
                     print(rela1)
                     break
             print("rela1 is gonna join rela2:", rela1, rela2)
+            self.plan.joinRela1 = rela1
+            self.plan.joinRela2 = rela2
+            self.plan.joinOP = joinOP
             print("JOIN OP is", joinOP)
             #joinOP = joinCtx.join_operator()[0]
             #print(len(joinCtx.join_operator()))
@@ -181,7 +189,9 @@ class SelectListener(SQLiteParserListener):
             if joinCtx.join_constraint() != []:
                 joinCons = joinCtx.join_constraint()[0]
                 expr = joinCons.expr().getText()
-                print("expr is", expr)
+                if '!' not in expr and '<' not in expr and '>' not in expr and '=' in expr:
+                    self.plan.join_expr_eval = expr.replace('=', '==')
+                print("expr is", self.plan.join_expr_eval)
 
         return super().enterSelect_core(ctx)    
 
@@ -288,13 +298,16 @@ def main():
         SELECT * FROM id2salary WHERE id2salary.salary>=1500;
     """
     sql8 = """
-        SELECT * FROM id2salary WHERE id2salary.salary=1500 AND id2salary.id=707;
+        SELECT * FROM id2salary WHERE id2salary.salary=1500 OR id2salary.id=707;
     """
     sql9 = """
-        SELECT min(id2salary.id), min(id2salary.salary) FROM id2salary WHERE id2salary.id=707 GROUP BY id2salary.id HAVING MIN(id2salary.salary)>=1500 OR MIN(id2salary.salary)<2000;
+        SELECT min(id2salary.id), min(id2salary.salary) FROM id2salary WHERE id2salary.id=707 AND id2salary.salary>=1000 GROUP BY id2salary.id HAVING MIN(id2salary.salary)>=1500 OR MIN(id2salary.salary)<2000;
+    """
+    sql10 = """
+        SELECT ptr.id, ptr.name, id2salary.salary FROM ptr INNER JOIN id2salary ON id2salary.id = ptr.id WHERE ptr.id>=300 AND id2salary.salary<7000;
     """
 
-    input_stream = InputStream(sql7)
+    input_stream = InputStream(sql10)
     lexer = SQLiteLexer(input_stream)
     token_stream = CommonTokenStream(lexer)
     parser = SQLiteParser(token_stream)
