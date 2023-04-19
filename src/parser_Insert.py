@@ -68,7 +68,6 @@ def main():
     listener = InsertListener()
     walker = ParseTreeWalker()
     walker.walk(listener, tree)
-
     logging.debug(listener.plan.__dict__)
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@ import parser_CreateTable
 import parser_Insert
 import parser_Select
 from prettytable import PrettyTable
+import parser_DropTable
 from BTrees.OOBTree import OOBTree
 
 ############################### Core Mem Data Structure & magic number config #############
@@ -416,7 +417,12 @@ def mem_exec(sql):
             )        #promise, single attr
         
     elif sql.upper().find("DROP TABLE") != -1:
-        pass
+        virtual_plan = parser_DropTable.virtual_plan_drop(sql)
+        print(virtual_plan.__dict__)
+        # TODO 开发底层模块，删表
+        #drop_table(virtual_plan.table_name)
+        #if virtual_plan.table_name in BTreeDict:
+        #    del BTreeDict[virtual_plan.table_name]
 
     elif sql.upper().find("INSERT INTO") != -1:
         virtual_plan = parser_Insert.virtual_plan_create(sql)
