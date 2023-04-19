@@ -1,1 +1,1 @@
-rm *.btree
+rm log_err_trace/*

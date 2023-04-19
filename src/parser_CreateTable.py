@@ -63,68 +63,38 @@ class CreateListener(SQLiteParserListener):
 
 def virtual_plan_create(sql):
     logging.debug(sql)
-    # 创建一个输入流
     input_stream = InputStream(sql)
-
-    # 创建一个词法分析器
     lexer = SQLiteLexer(input_stream)
-
-    # 创建一个词法记号流
     token_stream = CommonTokenStream(lexer)
-
-    # 创建一个语法分析器
     parser = SQLiteParser(token_stream)
-
-    # 解析 SQL 语句，生成语法树
     tree = parser.parse()
-
-    # 创建一个 Listener 实例
     listener = CreateListener()
-
-    # 遍历语法树
     walker = ParseTreeWalker()
     walker.walk(listener, tree)
     return listener.plan
 
-# CREATE TABLE TTT(ID INT PRIMARY KEY);
 def main():
-    # 要解析的 SQL 语句
     sql = """
-        CREATE TABLE orders (
-        id INT PRIMARY KEY,
-        customer_id INT,
-        FOREIGN KEY (customer_id) REFERENCES ptr(id)
+        CREATE TABLE customer_name (
+        id int PRIMARY KEY,
+        customer_name str
         );
     """
-    ## {
-    # 'table_name': 'orders', 
-    # 'columns': [
-    #   {'name': 'id', 'type': 'INT', 'constraints': [{'type': 'PRIMARYKEY'}]}, 
-    #   {'name': 'customer_id', 'type': 'INT', 'constraints': []}, 
-    #   {'name': 'order_date', 'type': 'DATE', 'constraints': []}], 
-    # 'primary_key': 'id', 
-    # 'foreign_key': {'table': 'customers', 'local_columns': ['customer_id'], 'foreign_columns': ['id']}
-    # }
 
-    # 创建一个输入流
+    sql2 = """
+        CREATE TABLE orders (
+        id int PRIMARY KEY,
+        customer_id int,
+        FOREIGN KEY (customer_id) REFERENCES customer_name(id)
+        );
+    """
+
     input_stream = InputStream(sql)
-
-    # 创建一个词法分析器
     lexer = SQLiteLexer(input_stream)
-
-    # 创建一个词法记号流
     token_stream = CommonTokenStream(lexer)
-
-    # 创建一个语法分析器
     parser = SQLiteParser(token_stream)
-
-    # 解析 SQL 语句，生成语法树
     tree = parser.parse()
-
-    # 创建一个 Listener 实例
     listener = CreateListener()
-
-    # 遍历语法树
     walker = ParseTreeWalker()
     walker.walk(listener, tree)
 

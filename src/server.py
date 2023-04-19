@@ -7,23 +7,27 @@ import dill
 import uuid
 import time
 import pickle
+import shutil
 import logging
+import traceback
+from prettytable import PrettyTable
+from BTrees.OOBTree import OOBTree
+
 # my parsers
 import parser_CreateTable
 import parser_Insert
 import parser_Select
-from prettytable import PrettyTable
 import parser_DropTable
-from BTrees.OOBTree import OOBTree
 
 ############################### Core Mem Data Structure & magic number config #############
 baseDBDict = {}                         # [relation][uuid:173]  -> {id:7, salary:1000}
 BTreeDict = {}                          # [relation][attribute] -> BTree, each key map to a set, set stores uuids, uuid points to the row
 metaDict = {}                           # [relation]            -> {id:int, name:str}
-constraintDict = {}                     # [relation]            -> {primary: attr, foreign:{attr:id, rela2:, rela_attr:}}
+constraintDict = {}      #TODO 0->1     # [relation]            -> {primary: attr, foreign0:[{attr:, rela2:, rela_attr:},...], foreign1:[{attr:, rela2:, rela_attr:},...]}
 
-snapShotInterVal = 2
+snapShotInterVal = 1
 tmpSQLLog = []
+lazyDropRelationList = []
 
 conditionOptimizerFlag = False
 joinOptimizerFlag = False
@@ -200,30 +204,54 @@ def load_BaseDB(relationName):
 def create_table(relationName, cmd):
     if relationName in metaDict.keys():
         raiseErr("relation exists")
-
     mp = {}
     iter = 0
     while iter < len(cmd[1:]):
         attName = str(cmd[iter])
         knd = str(cmd[iter+1])
-        #tuList.append((attName, knd,))
         mp.setdefault(attName, knd)
         iter += 2
-    #metaDict.setdefault(relationName, tuList)
     metaDict.setdefault(relationName, mp)
-    #metaModifier.create_table(relationName, tuList)
+    baseDBDict.setdefault(relationName, {})
 
-# TODO 主键外键约束，底层模块做
+# DONE 外键约束，实现上直接让外键约束失效吧？rela1和rela2就可以统一处理了
+def drop_table(relationName):
+    lazyDropRelationList.append(relationName)
+    del baseDBDict[relationName]
+    if relationName in BTreeDict.keys():    #不能爆，万一没呢，兼容下吧虽然默认带主键了
+        del BTreeDict[relationName]
+    del metaDict[relationName]
+
+    if 'foreign0' in constraintDict[relationName].keys():
+        constrainMpList = constraintDict[relationName]['foreign0']
+        toDelMp = []
+
+        for constrainMP in constrainMpList:
+            attr = constrainMP['attr']
+            rela2 = constrainMP['rela2']
+            attr2 = constrainMP['attr2']
+            for constrainMP2 in constraintDict[rela2]['foreign1']:
+                if constrainMP2['attr'] == attr2 and constrainMP2['rela2'] == relationName and constrainMP2['attr2'] == attr:
+                    toDelMp.append(constrainMP2)
+            for constrainMP2 in toDelMp:
+                constraintDict[rela2]['foreign1'].remove(constrainMP2)
+            if len(constraintDict[rela2]['foreign1']) == 0:
+                del constraintDict[rela2]['foreign1']
+            logging.debug("Should have clean arrow head, rela2 is:"+rela2+" "+str(constraintDict[rela2]))
+
+    if 'foreign1' in constraintDict[relationName].keys():
+        relaS = ""
+        for constrainMP in constraintDict[relationName]['foreign1']:
+            relaS += str(constrainMP['rela2'])+'\n'
+        raise ForeignKeyError('This relation\'s primary key is still a reference key in these relations:\n' + relaS +'Cant drop now.')
+
+    del constraintDict[relationName]
+
+# DONE 主键外键约束，底层模块做
 def write_row(relationName, cmd):
-    if relationName not in baseDBDict.keys():
-        #load_BaseDB(relationName)
-        # TODO 不确定
-        baseDBDict.setdefault(relationName, {})
-
     mp = {}
-    
     meta_dict = metaDict[relationName]
-    logging.debug(meta_dict)
+    logging.debug("meta_dict: "+str(meta_dict))
 
     for i, k in enumerate(meta_dict.keys()):
         if i >= len(cmd):
@@ -242,11 +270,20 @@ def write_row(relationName, cmd):
         # check primary key 
         if relationName in constraintDict:
             if 'primary' in constraintDict[relationName]:
-                pk = constraintDict[relationName]['primary']
-                lst = query_equal(relationName,[pk, mp[pk],])
+                primaryKey = constraintDict[relationName]['primary']
+                lst = query_equal(relationName,[primaryKey, mp[primaryKey],])
                 if len(lst) != 0:
-                    raise PrimaryKeyError('Error: Primary key duplicate' + str(mp[pk]))
+                    raise PrimaryKeyError('Error: Primary key duplicate ' + str(mp[primaryKey]))
+        
         # check foreign key
+        if relationName in constraintDict.keys() and 'foreign0' in constraintDict[relationName].keys():
+            for foreign_mp in constraintDict[relationName]['foreign0']: #箭尾，检测箭头的主键是否有值
+                rela2 = foreign_mp['rela2']
+                attr2 = foreign_mp['attr2']
+                attr = foreign_mp['attr']
+                if mp[attr] not in BTreeDict[rela2][attr2].keys():
+                    raise ForeignKeyError('New value didnt show in the referenced relation')
+
         # update base csv
         btree_value = str(uuid.uuid4())
         baseDBDict[relationName].setdefault(btree_value,{})
@@ -263,6 +300,8 @@ def write_row(relationName, cmd):
                     btree.setdefault(k, set())
                 btree[k].add(btree_value)
 
+        print(btree[inner_mp[primaryKey]])
+
 # ptr id 909
 # check if exists indexing(hash/btree), else O(n) scan
 def query_equal(relationName, cmd):
@@ -277,10 +316,10 @@ def query_equal(relationName, cmd):
     if relationName in BTreeDict.keys() and  attr in BTreeDict[relationName].keys():
         # TODO: test
         btree = BTreeDict[relationName][attr]
-        #print(relationName, attr)
         logging.debug(str(relationName)+" " + str(attr))
 
-        #print(list(btree.keys()))
+        if val not in btree.keys():
+            return ret_list
         uu_set = btree[val]
         #print(uu_set)
         logging.debug(uu_set)
@@ -323,6 +362,7 @@ def query_range(relationName, cmd):
     if not found:
         print("Nothing found.")
 
+# optional, not maintained for a while, don't use directly
 def create_index(relationName, cmd):
     indexAttr = cmd[0]
     if relationName in BTreeDict.keys() and indexAttr in BTreeDict[relationName].keys():
@@ -348,8 +388,11 @@ def del_row(relationName, cmd):
             del BTreeDict[relationName][k][row_mp[k]]
     del baseDBDict[relationName][uu]
 
+# 下面两个操作真正实现约束在增删改，因为只会在建表调用他们
+# 由于这个操作只在建表有，这里不做重复值检测
+# 涉及加主键列
 def create_primary(relationName, attr):
-    logging.debug(relationName, attr)
+    logging.debug("relation Name: "+str(relationName)+"attr: "+str(attr))
     if relationName not in constraintDict.keys():
         constraintDict.setdefault(relationName, {})
     if "primary" in constraintDict[relationName].keys():
@@ -357,18 +400,33 @@ def create_primary(relationName, attr):
     else:
         constraintDict[relationName].setdefault("primary", attr)
 
+# 这个引用关系用于确保在该表中的数据始终关联到另一个表中的已有数据
+# 由于这个操作只在建表有，这里不做参考存在检测，只需要检测是不是ref键是不是主键
+# rela1：涉及加外键列
+# rela2：涉及删主键列
+# relationName[attr] -> rela2[attr2]
 def create_foreign(relationName, attr, rela2, attr2):
-    logging.debug(relationName, attr, rela2, attr2)
-    if attr2 not in metaDict[rela2].keys():
-        pass
+    logging.debug("rela1: "+str(relationName)+"attr1: "+str(attr)+"rela2: "+str(rela2)+"attr2: "+str(attr2))
+    if rela2 not in constraintDict.keys():
+        raiseErr("Didn't find " + str(rela2) + " has primary key constrains, or it does'nt exist at all")
+    if attr2 != constraintDict[rela2]["primary"]:
+        raiseErr(str(attr2)+" is not a primary key in "+str(rela2))
     if metaDict[rela2][attr2] != metaDict[relationName][attr]:
-        pass
-    if "foreign" in constraintDict[relationName].keys():    #TODO ???用吗
-        raise ForeignKeyError(f"{relationName} already has a foreign key.")
-    else:
-        constraintDict[relationName].setdefault("foreign", {})
-        constraintDict[relationName]["foreign"].setdefault("rela2", rela2)
-        constraintDict[relationName]["foreign"].setdefault("attr2", attr2)
+        raiseErr("meta for two attrs mismatch, like int points to str")
+    # arrow tail
+    constraintDict[relationName].setdefault("foreign0", list())
+    tmpMP = {}
+    tmpMP.setdefault("attr", attr)
+    tmpMP.setdefault("rela2", rela2)
+    tmpMP.setdefault("attr2", attr2)
+    constraintDict[relationName]["foreign0"].append(tmpMP)
+    # arrow head
+    constraintDict[rela2].setdefault("foreign1", list())
+    tmpMP = {}
+    tmpMP.setdefault("attr", attr2)
+    tmpMP.setdefault("rela2", relationName)
+    tmpMP.setdefault("attr2", attr)
+    constraintDict[rela2]["foreign1"].append(tmpMP)
 
 def read_sql():
     sql = ""
@@ -397,7 +455,7 @@ def mem_exec(sql):
     # TODO? 根据语法树根节点，不采用字符串查询，不搞
     if sql.upper().find("CREATE TABLE") != -1:
         virtual_plan = parser_CreateTable.virtual_plan_create(sql)
-        logging.debug(virtual_plan.__dict__)
+        logging.debug("virtual_plan dict is: " + str(virtual_plan.__dict__))
         lst = []
         for pr in virtual_plan.columns:
             lst.append(pr['name'])
@@ -405,9 +463,9 @@ def mem_exec(sql):
         create_table(virtual_plan.table_name, lst)
         if virtual_plan.primary_key:
             create_primary(virtual_plan.table_name, virtual_plan.primary_key)                       #promise, single attr
-            # create_index(virtual_plan.table_name, virtual_plan.primary_key)
             # 只需要注册就行，不需要调用creat_index，因为baseDB没东西
-            BTreeDict.setdefault(virtual_plan.table_name, OOBTree())
+            BTreeDict.setdefault(virtual_plan.table_name, {})
+            BTreeDict[virtual_plan.table_name].setdefault(virtual_plan.primary_key, OOBTree())
         if virtual_plan.foreign_key:
             create_foreign(
             virtual_plan.table_name, virtual_plan.foreign_key["local_columns"][0], 
@@ -418,9 +476,7 @@ def mem_exec(sql):
         virtual_plan = parser_DropTable.virtual_plan_drop(sql)
         print(virtual_plan.__dict__)
         # TODO 开发底层模块，删表
-        #drop_table(virtual_plan.table_name)
-        #if virtual_plan.table_name in BTreeDict:
-        #    del BTreeDict[virtual_plan.table_name]
+        drop_table(virtual_plan.table_name)
 
     elif sql.upper().find("INSERT INTO") != -1:
         virtual_plan = parser_Insert.virtual_plan_create(sql)
@@ -814,6 +870,17 @@ def dirty_cache_rollback_and_commit():
         mem_exec(query)
     persist_snapshot()
 
+def lazy_file_del():
+    for rela in lazyDropRelationList:
+        metaF = getMetaFileName(rela)
+        baseF = getBaseDBFileName(rela)
+        consF = getConstraintFileName(rela)
+        btreDir = "btree/"+rela
+        os.remove(metaF)
+        os.remove(baseF)
+        os.remove(consF)
+        shutil.rmtree(btreDir)
+
 def engine():
     load_snapshot()
     sqlCounter = 0
@@ -836,8 +903,12 @@ def engine():
             mem_exec(sql)
         except Exception as e:  # Capture any exception, raise runnable error like primary/foreign here
             err_logger.error(f"sql runtime error: {type(e)}: {e}")
+            with open('log_err_trace/err_trace_'+str(time.strftime('%y%m%d_%H', time.localtime()))+'.log', 'a') as f:
+                f.write(traceback.format_exc())
+                f.write("\n")
             #print("sql runtime error:", e)
             print("Start cleaning dirty cache, rollback to commit previous sql...")
+            lazyDropRelationList.clear()
             dirty_cache_rollback_and_commit()
             tmpSQLLog.clear()
             continue # skip regular persist
@@ -846,6 +917,8 @@ def engine():
         # persist
         if sqlCounter % snapShotInterVal == 0:
             #global baseDBDict, BTreeDict, metaDict, constraintDict
+            lazy_file_del()
+            lazyDropRelationList.clear()
             persist_snapshot()
             tmpSQLLog.clear()
             print("Periodcally persists done, all previous sql committed!")
