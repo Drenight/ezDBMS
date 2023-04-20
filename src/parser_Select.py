@@ -316,6 +316,7 @@ def main():
     """
     # This is ok cause input order is correct, but 12 is temporary bugging
     # bug fixed at "ans1 = baseDBDict[rela2][uu2][join_attr1]"
+    # commit 7250162
     sql13 = """
         SELECT customer_name.id, customer_name.customer_name, orders.id, orders.customer_id FROM customer_name INNER JOIN orders ON customer_name.id = orders.customer_id;
     """

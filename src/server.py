@@ -811,7 +811,7 @@ def mem_exec(sql):
                         # ON 
                         #   orders.customer_id = customer_name.id;
 
-                        print("debugg,", rela1, rela2, join_rela1)
+                        #print("debugg,", rela1, rela2, join_rela1)
                         # debugg, customer_name orders orders
                         
 
