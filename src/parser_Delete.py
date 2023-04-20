@@ -45,7 +45,7 @@ class DeleteListener(SQLiteParserListener):
             self.plan.where_expr2_eval = self.plan.where_expr2_eval.replace('=', '==')
         #print(self.plan.where_expr1_eval)
 
-def virtual_plan_delete(sql):
+def virtual_plan_create(sql):
     logging.debug(sql)
     input_stream = InputStream(sql)
     lexer = SQLiteLexer(input_stream)
@@ -64,7 +64,11 @@ def main():
     sql2 = """
         DELETE FROM orders WHERE orders.id=1 AND orders.customer_id=1;
     """
-    input_stream = InputStream(sql)
+    sql3 = """
+        DELETE FROM orders WHERE orders.id=1;
+    """
+
+    input_stream = InputStream(sql3)
     lexer = SQLiteLexer(input_stream)
     token_stream = CommonTokenStream(lexer)
     parser = SQLiteParser(token_stream)

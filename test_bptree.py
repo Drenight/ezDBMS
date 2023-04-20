@@ -1,9 +1,7 @@
-from sortedcontainers import SortedDict
+lst = [1, 7]
+new_v = 7
 
-sd = SortedDict({'a': 1, 'b': 2, 'c': 3, 'd': 4})
-
-def rank(sd, key):
-    pos = sd.bisect_left(key)
-    return pos + sum(1 for k in sd.keys()[:pos] if sd[k] == sd[key])
-
-print(rank(sd, 'b'))
+if new_v not in lst:
+    print(7)
+else:
+    print(6)
