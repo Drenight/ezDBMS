@@ -18,12 +18,13 @@ import parser_CreateTable
 import parser_Insert
 import parser_Select
 import parser_DropTable
+import parser_Delete
 
 ############################### Core Mem Data Structure & magic number config #############
 baseDBDict = {}                         # [relation][uuid:173]  -> {id:7, salary:1000}
 BTreeDict = {}                          # [relation][attribute] -> BTree, each key map to a set, set stores uuids, uuid points to the row
 metaDict = {}                           # [relation]            -> {id:int, name:str}
-constraintDict = {}      #TODO 0->1     # [relation]            -> {primary: attr, foreign0:[{attr:, rela2:, rela_attr:},...], foreign1:[{attr:, rela2:, rela_attr:},...]}
+constraintDict = {}      #TODO 0->1     # [relation]            -> {primary: attr, foreign0:[{attr:, rela2:, attr2:},...], foreign1:[{attr:, rela2:, attr2:},...]}
 
 snapShotInterVal = 1
 tmpSQLLog = []
@@ -302,6 +303,101 @@ def write_row(relationName, cmd):
 
         print(btree[inner_mp[primaryKey]])
 
+def judge_row(row_uu, virtual_plan):
+    if virtual_plan.where_expr != None:
+        brkRelaNameIndex1 = 0
+        brkRelaNameIndex2 = 0
+        brkAttrNameIndex1 = 0
+        brkAttrNameIndex2 = 0
+
+        print(virtual_plan.where_expr1_eval)
+        print(virtual_plan.where_expr2_eval)
+
+        for ch in virtual_plan.where_expr1_eval:
+            if not ch.isalnum() and ch=='.':
+                brkRelaNameIndex1 = brkAttrNameIndex1
+            if not ch.isalnum() and ch!='.' and ch!='_':
+                break
+            brkAttrNameIndex1 += 1
+        if virtual_plan.where_expr2_eval != None:
+            for ch in virtual_plan.where_expr2_eval:
+                if not ch.isalnum() and ch=='.':
+                    brkRelaNameIndex2 = brkAttrNameIndex2
+                if not ch.isalnum() and ch!='.' and ch!='_':
+                    break
+                brkAttrNameIndex2 += 1
+
+        where_expr1_rela = virtual_plan.where_expr1_eval[:brkRelaNameIndex1]
+        where_expr1_attr = virtual_plan.where_expr1_eval[brkRelaNameIndex1+1:brkAttrNameIndex1]
+        logging.debug("First where expr rela&attr is "+str(where_expr1_rela)+"&"+str(where_expr1_attr))
+        if virtual_plan.where_expr2_eval != None:
+            where_expr2_rela = virtual_plan.where_expr2_eval[:brkRelaNameIndex2]
+            where_expr2_attr = virtual_plan.where_expr2_eval[brkRelaNameIndex2+1:brkAttrNameIndex2]
+            logging.debug("Second where expr rela&attr is "+str(where_expr2_rela)+"&"+str(where_expr2_attr))
+
+    if virtual_plan.where_expr == None:
+        return True
+    elif virtual_plan.where_expr2_eval == None:   # use where filter rows
+        ans = baseDBDict[where_expr1_rela][row_uu][where_expr1_attr]
+        tmpEvalS = virtual_plan.where_expr1_eval.replace(virtual_plan.where_expr1_eval[:brkAttrNameIndex1], str(ans))
+        if eval(tmpEvalS):
+            return True
+    else:   # double expr && no join
+        ans1_where_no_join = baseDBDict[where_expr1_rela][row_uu][where_expr1_attr]
+        if metaDict[where_expr1_rela][where_expr1_attr] == 'str':
+            ans1_where_no_join = '\''+ans1_where_no_join+'\''
+        ans2_where_no_join = baseDBDict[where_expr2_rela][row_uu][where_expr2_attr]
+        if metaDict[where_expr2_rela][where_expr2_attr] == 'str':
+            ans2_where_no_join = '\''+ans2_where_no_join+'\''
+
+        tmpEvalS1 = virtual_plan.where_expr1_eval.replace(virtual_plan.where_expr1_eval[:brkAttrNameIndex1], str(ans1_where_no_join))
+        tmpEvalS2 = virtual_plan.where_expr2_eval.replace(virtual_plan.where_expr2_eval[:brkAttrNameIndex2], str(ans2_where_no_join))
+        logging.debug("ok double where without join: "+str(tmpEvalS1)+" "+str(tmpEvalS2))
+        if eval(str(eval(tmpEvalS1))+" "+str(virtual_plan.where_logic)+" "+str(eval(tmpEvalS2))):
+            return True
+
+#del by uu
+def del_row_using_uu_func(relationName, uu):
+    row_mp = baseDBDict[relationName][uu]
+    for k in BTreeDict[relationName]:
+        BTreeDict[relationName][k][row_mp[k]].remove(uu)
+        if len(BTreeDict[relationName][k][row_mp[k]]) == 0:
+            del BTreeDict[relationName][k][row_mp[k]]
+    del baseDBDict[relationName][uu]
+def erase_row(virtual_plan):
+    rela = virtual_plan.table_name
+    del_row_uu = []
+    for row_uu in baseDBDict[rela]:
+        if judge_row(row_uu, virtual_plan):
+            del_row_uu.append(row_uu)
+    logging.debug("del_row_uu now is: "+str(del_row_uu))
+    if "primary" not in constraintDict[rela].keys() or "foreign1" not in constraintDict[rela].keys():
+        for row_uu in del_row_uu:
+            del_row_using_uu_func(rela, row_uu)
+    else:    
+        cantDelPrimaryKeyList = []
+        #外键，check主键是不是被指向，list这些行不能被删，存在就不做这次操作，打印这些行的主键
+        attr = constraintDict[rela]['primary']
+
+        constrainMpList = constraintDict[rela]['foreign1']
+        for constrainMP in constrainMpList:
+            rela2 = constrainMP['rela2']
+            attr2 = constrainMP['attr2']
+            for row_uu in del_row_uu:
+                if attr2 in BTreeDict[rela2].keys():
+                    if baseDBDict[rela][row_uu][attr] in BTreeDict[rela2][attr2].keys():
+                        cantDelPrimaryKeyList.append(str(baseDBDict[rela][row_uu][attr])+" in "+str(rela2)+"."+str(attr2))
+                else:
+                    for row_uu2 in baseDBDict[rela2]:
+                        if baseDBDict[rela][row_uu][attr] == baseDBDict[rela2][row_uu2][attr2]:
+                            cantDelPrimaryKeyList.append(str(baseDBDict[rela][row_uu][attr])+" in "+str(rela2)+"."+str(attr2))
+                            break
+        if len(cantDelPrimaryKeyList) == 0:
+            for row_uu in del_row_uu:
+                del_row_using_uu_func(rela, row_uu)
+        else:
+            raise ForeignKeyError('This relation has following primary keys which is still a reference key in other relations:\n' + str(cantDelPrimaryKeyList) +'\nDelete nothing.')
+
 # ptr id 909
 # check if exists indexing(hash/btree), else O(n) scan
 def query_equal(relationName, cmd):
@@ -378,15 +474,6 @@ def create_index(relationName, cmd):
             btree[k] = set()
         btree[k].add(uu)
         logging.debug(BTreeDict[relationName][indexAttr][baseDBDict[relationName][uu][indexAttr]])
-
-def del_row(relationName, cmd):
-    uu = cmd[0]
-    row_mp = baseDBDict[relationName][uu]
-    for k in BTreeDict[relationName]:
-        BTreeDict[relationName][k][row_mp[k]].remove(uu)
-        if len(BTreeDict[relationName][k][row_mp[k]]) == 0:
-            del BTreeDict[relationName][k][row_mp[k]]
-    del baseDBDict[relationName][uu]
 
 # 下面两个操作真正实现约束在增删改，因为只会在建表调用他们
 # 由于这个操作只在建表有，这里不做重复值检测
@@ -475,7 +562,6 @@ def mem_exec(sql):
     elif sql.upper().find("DROP TABLE") != -1:
         virtual_plan = parser_DropTable.virtual_plan_drop(sql)
         print(virtual_plan.__dict__)
-        # TODO 开发底层模块，删表
         drop_table(virtual_plan.table_name)
 
     elif sql.upper().find("INSERT INTO") != -1:
@@ -489,6 +575,11 @@ def mem_exec(sql):
             op_list.append(virtual_plan.columnsValue[i])
         write_row(virtual_plan.table_name, op_list)
     
+    elif sql.upper().find("DELETE FROM") != -1:
+        virtual_plan = parser_Delete.virtual_plan_delete(sql)
+        logging.debug(virtual_plan.__dict__)
+        erase_row(virtual_plan)
+ 
     #forjoin select *, id2salary.id, name from ptr;
     # select *, name from ptr;
     elif sql.upper().find("SELECT") != -1:
@@ -525,14 +616,14 @@ def mem_exec(sql):
             for ch in virtual_plan.where_expr1_eval:
                 if not ch.isalnum() and ch=='.':
                     brkRelaNameIndex1 = brkAttrNameIndex1
-                if not ch.isalnum() and ch!='.':
+                if not ch.isalnum() and ch!='.' and ch!='_':
                     break
                 brkAttrNameIndex1 += 1
             if virtual_plan.where_expr2_eval != None:
                 for ch in virtual_plan.where_expr2_eval:
                     if not ch.isalnum() and ch=='.':
                         brkRelaNameIndex2 = brkAttrNameIndex2
-                    if not ch.isalnum() and ch!='.':
+                    if not ch.isalnum() and ch!='.' and ch!='_':
                         break
                     brkAttrNameIndex2 += 1
 
@@ -566,8 +657,16 @@ def mem_exec(sql):
                             mpAttr[rela][attr].append(baseDBDict[rela][row_uu][attr])
                         row_cnt += 1
                 else:   # double expr && no join
+                    #ans1_where_no_join = baseDBDict[where_expr1_rela][row_uu][where_expr1_attr]
+                    #ans2_where_no_join = baseDBDict[where_expr2_rela][row_uu][where_expr2_attr]
+
                     ans1_where_no_join = baseDBDict[where_expr1_rela][row_uu][where_expr1_attr]
+                    if metaDict[where_expr1_rela][where_expr1_attr] == 'str':
+                        ans1_where_no_join = '\''+ans1_where_no_join+'\''
                     ans2_where_no_join = baseDBDict[where_expr2_rela][row_uu][where_expr2_attr]
+                    if metaDict[where_expr2_rela][where_expr2_attr] == 'str':
+                        ans2_where_no_join = '\''+ans2_where_no_join+'\''
+
                     tmpEvalS1 = virtual_plan.where_expr1_eval.replace(virtual_plan.where_expr1_eval[:brkAttrNameIndex1], str(ans1_where_no_join))
                     tmpEvalS2 = virtual_plan.where_expr2_eval.replace(virtual_plan.where_expr2_eval[:brkAttrNameIndex2], str(ans2_where_no_join))
                     logging.debug("ok double where without join: "+str(tmpEvalS1)+" "+str(tmpEvalS2))
@@ -858,7 +957,7 @@ def mem_exec(sql):
         create_index(cmd[0], cmd[1:])
     elif int(op) == 5:    # 5 ptr uuid, del a row
         cmd = input().split()
-        del_row(cmd[0], cmd[1:])
+        #del_row(cmd[0], cmd[1:])
 
 def dirty_cache_rollback_and_commit():
     metaDict.clear()
