@@ -71,6 +71,9 @@ def main():
     sql5 = """
         INSERT INTO customer_name(id, customer_name) VALUES (1,'Alice');
     """
+    sql6= """
+        INSERT INTO customer_name(id, customer_name) VALUES (7,'Bob');
+    """
 
     input_stream = InputStream(sql)
     lexer = SQLiteLexer(input_stream)

@@ -108,8 +108,8 @@ class SelectListener(SQLiteParserListener):
             elif str(havingExprCtx.OR_()) == 'OR':
                 self.plan.having_logic = 'or'
 
-            print("logic is ", self.plan.having_logic)
-            print("having expr:", self.plan.having_expr)
+            #print("logic is ", self.plan.having_logic)
+            #print("having expr:", self.plan.having_expr)
             if self.plan.having_logic != None:
                 self.plan.having_expr1_eval = self.plan.having_expr[:self.plan.having_expr.index(self.plan.having_logic.upper())]
                 self.plan.having_expr2_eval = self.plan.having_expr[self.plan.having_expr.index(self.plan.having_logic.upper())+len(self.plan.having_logic):]
@@ -158,8 +158,8 @@ class SelectListener(SQLiteParserListener):
         joinCtx = ctx.join_clause()
         if joinCtx != None:
             self.plan.Join = True
-            for tar in joinCtx.table_or_subquery():
-                print("ww",tar.getText())
+            #for tar in joinCtx.table_or_subquery():
+                #print("ww",tar.getText())
 
             #Antlr-Python疑似有问题，INNER这种会被解析到rela1上来，这里手动解开
             bad_set = set()
@@ -175,13 +175,13 @@ class SelectListener(SQLiteParserListener):
                 if join_str in rela1:
                     joinOP = join_str
                     rela1 = rela1.split(join_str)[0]
-                    print(rela1)
+                    #print(rela1)
                     break
-            print("rela1 is gonna join rela2:", rela1, rela2)
+            #print("rela1 is gonna join rela2:", rela1, rela2)
             self.plan.joinRela1 = rela1
             self.plan.joinRela2 = rela2
             self.plan.joinOP = joinOP
-            print("JOIN OP is", joinOP)
+            #print("JOIN OP is", joinOP)
             #joinOP = joinCtx.join_operator()[0]
             #print(len(joinCtx.join_operator()))
             #print("JOIN OP IS", joinOP.getText())
@@ -209,16 +209,16 @@ class SelectListener(SQLiteParserListener):
         if ctx.table_name() != None: 
             #self.plan.rela2attr.setdefault(ctx.table_name().getText(), {'*'})
             self.plan.queryAttr.append((ctx.table_name().getText(), '*', ''))
-            print("table name is", ctx.table_name().getText()) 
+            #print("table name is", ctx.table_name().getText()) 
         
         # expr进来的，不带*
         expr_ctx = ctx.expr()
         if expr_ctx != None:
             if expr_ctx.table_name() != None:
                 # 捕获给定rela.的列
-                print("given rela attrs: ",expr_ctx.table_name().getText())
+                #print("given rela attrs: ",expr_ctx.table_name().getText())
                 if expr_ctx.column_name() != None:  # 一定会进吧，SELECT 没有只给rela名的
-                    print(expr_ctx.column_name().getText())
+                    #print(expr_ctx.column_name().getText())
                     self.plan.queryAttr.append((expr_ctx.table_name().getText(), expr_ctx.column_name().getText(), ''))
             elif expr_ctx.column_name() != None:
                 # 捕获where的列，min之类聚合的不会被捕获
@@ -231,15 +231,15 @@ class SelectListener(SQLiteParserListener):
                 # function_name OPEN_PAR ((DISTINCT_? expr ( COMMA expr)*) | STAR)? CLOSE_PAR filter_clause? over_clause?
                 if expr_ctx.STAR(): #等效 expr_ctx.expr() == []: 
                     # avg(*)这种
-                    print(expr_ctx.function_name().getText())
-                    print("fin: *")
+                    #print(expr_ctx.function_name().getText())
+                    #print("fin: *")
                     self.plan.queryAttr.append(("special_WHERE", '*', expr_ctx.function_name().getText()))
                 else:
                     function_ctx = expr_ctx.expr()[0]
-                    print(expr_ctx.function_name().getText())   #avg这种
+                    #print(expr_ctx.function_name().getText())   #avg这种
                     if function_ctx != None:
                         if function_ctx.table_name()!=None:
-                            print("fin:",function_ctx.table_name().getText(), function_ctx.column_name().getText())
+                            #print("fin:",function_ctx.table_name().getText(), function_ctx.column_name().getText())
                             self.plan.queryAttr.append((function_ctx.table_name().getText(), function_ctx.column_name().getText(), expr_ctx.function_name().getText()))
                         else:
                             self.plan.queryAttr.append(('special_WHERE', function_ctx.column_name().getText(), expr_ctx.function_name().getText()))
@@ -307,8 +307,20 @@ def main():
     sql10 = """
         SELECT ptr.id, id2salary.id, ptr.name, id2salary.salary FROM ptr INNER JOIN id2salary ON ptr.id <= id2salary.id WHERE ptr.id>=300 AND id2salary.salary<7000;
     """
+    sql11 = """
+        SELECT min(ptr.id), id2salary.id, min(ptr.name), min(id2salary.salary) FROM ptr INNER JOIN id2salary ON ptr.id <= id2salary.id WHERE ptr.id>=300 AND id2salary.salary<7000 GROUP BY id2salary.id HAVING MIN(id2salary.salary)>=1500 OR MIN(id2salary.salary)<2000;
+    """
 
-    input_stream = InputStream(sql10)
+    sql12 = """
+        SELECT customer_name.id, customer_name.customer_name, orders.id, orders.customer_id FROM orders INNER JOIN customer_name ON orders.customer_id = customer_name.id;
+    """
+    # This is ok cause input order is correct, but 12 is temporary bugging
+    # bug fixed at "ans1 = baseDBDict[rela2][uu2][join_attr1]"
+    sql13 = """
+        SELECT customer_name.id, customer_name.customer_name, orders.id, orders.customer_id FROM customer_name INNER JOIN orders ON customer_name.id = orders.customer_id;
+    """
+
+    input_stream = InputStream(sql11)
     lexer = SQLiteLexer(input_stream)
     token_stream = CommonTokenStream(lexer)
     parser = SQLiteParser(token_stream)

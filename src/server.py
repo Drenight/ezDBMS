@@ -19,6 +19,7 @@ import parser_Insert
 import parser_Select
 import parser_DropTable
 import parser_Delete
+import parser_Update
 
 ############################### Core Mem Data Structure & magic number config #############
 baseDBDict = {}                         # [relation][uuid:173]  -> {id:7, salary:1000}
@@ -282,8 +283,8 @@ def write_row(relationName, cmd):
                 rela2 = foreign_mp['rela2']
                 attr2 = foreign_mp['attr2']
                 attr = foreign_mp['attr']
-                if mp[attr] not in BTreeDict[rela2][attr2].keys():
-                    raise ForeignKeyError('New value didnt show in the referenced relation')
+                if mp[attr] not in BTreeDict[rela2][attr2].keys():  #由于是箭头一定是主键，必定可以直接check b树
+                    raise ForeignKeyError('New value didnt show in the referenced relation '+str(rela2)+'.'+str(attr2))
 
         # update base csv
         btree_value = str(uuid.uuid4())
@@ -301,17 +302,18 @@ def write_row(relationName, cmd):
                     btree.setdefault(k, set())
                 btree[k].add(btree_value)
 
-        print(btree[inner_mp[primaryKey]])
+        #print(btree[inner_mp[primaryKey]])
 
 def judge_row(row_uu, virtual_plan):
+    #print("77")
     if virtual_plan.where_expr != None:
         brkRelaNameIndex1 = 0
         brkRelaNameIndex2 = 0
         brkAttrNameIndex1 = 0
         brkAttrNameIndex2 = 0
 
-        print(virtual_plan.where_expr1_eval)
-        print(virtual_plan.where_expr2_eval)
+        #print("expr1:", virtual_plan.where_expr1_eval)
+        #print("expr2:", virtual_plan.where_expr2_eval)
 
         for ch in virtual_plan.where_expr1_eval:
             if not ch.isalnum() and ch=='.':
@@ -397,6 +399,43 @@ def erase_row(virtual_plan):
                 del_row_using_uu_func(rela, row_uu)
         else:
             raise ForeignKeyError('This relation has following primary keys which is still a reference key in other relations:\n' + str(cantDelPrimaryKeyList) +'\nDelete nothing.')
+
+def update_row(virtual_plan):
+    rela = virtual_plan.table_name
+    # primary key cant upd
+    if rela in constraintDict.keys() and "primary" in constraintDict[rela].keys():
+        if constraintDict[rela]["primary"] in virtual_plan.columnMp.keys():
+            raise PrimaryKeyError('primary key cant upd, nothing changed')
+
+    # where linear scan
+    rela = virtual_plan.table_name
+    upd_row_uu = []
+    for row_uu in baseDBDict[rela]:
+        if judge_row(row_uu, virtual_plan):
+            upd_row_uu.append(row_uu)
+    logging.debug("upd_row_uu now is: "+str(upd_row_uu))
+
+    if len(upd_row_uu) == 0:
+        print("No row matched, nothing updated.")
+        return
+
+    # foreign constrains
+    # check 这个row的外键列【新】值v 在不在1表出现
+    if rela in constraintDict.keys() and "foreign0" in constraintDict[rela].keys():
+        for cons in constraintDict[rela]["foreign0"]:
+            attr  = cons['attr']
+            rela2 = cons['rela2']
+            attr2 = cons['attr2']
+            new_v = virtual_plan.columnMp[attr]
+            if new_v not in BTreeDict[rela2][attr2].keys():
+                raise ForeignKeyError('New value:'+str(new_v)+ ' didnt show in the referenced relation '+str(rela2)+'.'+str(attr2))
+
+    # check 这个row的外键列【原】值v是不是唯一一个 && 0表里出现了这个v  
+    # 蠢了，外键列是主键，当然是唯一一个，直接检查改没改主键就done
+    #if rela in constraintDict.keys() and "foreign1" in constraintDict[rela].keys():
+    #    if constraintDict[rela]['primary'] in virtual_plan.columnMp.keys():
+    #额，甚至不用做了，改主键在最上面就check过了，也就是foreign1，箭头的变更被连带维护了
+
 
 # ptr id 909
 # check if exists indexing(hash/btree), else O(n) scan
@@ -527,7 +566,7 @@ def read_sql():
     return sql
 
 def aggr_row_func(rowList, aggr_func, target_attr):  # row is a list of {'id2salary.id': 909, 'id2salary.salary': 2000}
-    print(rowList)
+    logging.debug("rowList is: "+str(rowList))
     ret = rowList[0][target_attr]
     for row in rowList:
         if aggr_func.upper() == "MIN":
@@ -560,8 +599,8 @@ def mem_exec(sql):
             )        #promise, single attr
         
     elif sql.upper().find("DROP TABLE") != -1:
-        virtual_plan = parser_DropTable.virtual_plan_drop(sql)
-        print(virtual_plan.__dict__)
+        virtual_plan = parser_DropTable.virtual_plan_create(sql)
+        #print(virtual_plan.__dict__)
         drop_table(virtual_plan.table_name)
 
     elif sql.upper().find("INSERT INTO") != -1:
@@ -576,10 +615,15 @@ def mem_exec(sql):
         write_row(virtual_plan.table_name, op_list)
     
     elif sql.upper().find("DELETE FROM") != -1:
-        virtual_plan = parser_Delete.virtual_plan_delete(sql)
+        virtual_plan = parser_Delete.virtual_plan_create(sql)
         logging.debug(virtual_plan.__dict__)
         erase_row(virtual_plan)
  
+    elif sql.upper().find("UPDATE") != -1:
+        virtual_plan = parser_Update.virtual_plan_create(sql)
+        logging.debug(virtual_plan.__dict__)
+        update_row(virtual_plan)
+
     #forjoin select *, id2salary.id, name from ptr;
     # select *, name from ptr;
     elif sql.upper().find("SELECT") != -1:
@@ -651,7 +695,7 @@ def mem_exec(sql):
                     #if rela == where_expr1_rela: 不用了吧，join分类后
                     ans = baseDBDict[where_expr1_rela][row_uu][where_expr1_attr]
                     tmpEvalS = virtual_plan.where_expr1_eval.replace(virtual_plan.where_expr1_eval[:brkAttrNameIndex1], str(ans))
-                    print(tmpEvalS)
+                    #print(tmpEvalS)
                     if eval(tmpEvalS):
                         for attr in mpAttr[rela]:
                             mpAttr[rela][attr].append(baseDBDict[rela][row_uu][attr])
@@ -707,7 +751,7 @@ def mem_exec(sql):
                         else:
                             ans = baseDBDict[where_expr1_rela][row_uu][where_expr1_attr]
                             tmpEvalS = virtual_plan.where_expr1_eval.replace(virtual_plan.where_expr1_eval[:brkAttrNameIndex1], str(ans))
-                            print("tmpEvalS at join one where", tmpEvalS)
+                            #print("tmpEvalS at join one where", tmpEvalS)
                             if eval(tmpEvalS):
                                 if rela_now == rela1: 
                                     join_uu_list1.append(row_uu)
@@ -756,13 +800,29 @@ def mem_exec(sql):
                         join_attr2 = right[right.index('.')+1:]
 
                         logging.debug("logic: "+logic+" left: "+left+" right: "+right)
+                        
+                        # bugging cause order:
+                        # SELECT customer_name.id, customer_name.customer_name, orders.id, orders.customer_id FROM orders INNER JOIN customer_name ON orders.customer_id = customer_name.id;
+                        # 
+                        # SELECT 
+                        #   customer_name.id, customer_name.customer_name, orders.id, orders.customer_id 
+                        # FROM 
+                        #   orders INNER JOIN customer_name 
+                        # ON 
+                        #   orders.customer_id = customer_name.id;
+
+                        print("debugg,", rela1, rela2, join_rela1)
+                        # debugg, customer_name orders orders
+                        
 
                         if join_rela1 == rela1:
                             ans1 = baseDBDict[rela1][uu1][join_attr1]
                             ans2 = baseDBDict[rela2][uu2][join_attr2]
                         else:
-                            ans1 = baseDBDict[rela2][uu2][join_attr2]
-                            ans2 = baseDBDict[rela1][uu1][join_attr1]
+                            # 因为join和select是反的，那么join_attr1就要给rela2了，   
+                            # rela1: select中先出现的那个
+                            ans1 = baseDBDict[rela2][uu2][join_attr1]
+                            ans2 = baseDBDict[rela1][uu1][join_attr2]
                         tmpSEval = str(ans1)+logic+str(ans2)
                         #logging.debug()
                         if eval(tmpSEval):
@@ -776,7 +836,7 @@ def mem_exec(sql):
         
         logging.debug("After filling, mpAttr is like: " + str(mpAttr))
 
-        print(row_cnt)
+        #print(row_cnt)
 
         # aggr_func = virtual_plan.having_expr1_eval[:virtual_plan.having_expr1_eval.index('(')] #MIN
 
@@ -880,7 +940,7 @@ def mem_exec(sql):
                 grpMP[rowMP[virtual_plan.group_attr]].append(rowMP)
                 #grpMP[virtual_plan.group_attr].append()
 
-            print("grouping done, now grpMP is:", grpMP) 
+            #print("grouping done, now grpMP is:", grpMP) 
             # grouping done, now grpMP is: {909: [{'id2salary.id': 909, 'id2salary.salary': 2000}], 707: [{'id2salary.id': 707, 'id2salary.salary': 2000}, {'id2salary.id': 707, 'id2salary.salary': 1500}]}
 
             # Filter by having
@@ -903,7 +963,7 @@ def mem_exec(sql):
                 #for rowMP in grpMP[aggr_attr_value]:
                 ans = aggr_row_func(grpMP[aggr_attr_value], aggr_func, target_attr)
                 tmpEvalS = virtual_plan.having_expr1_eval.replace(virtual_plan.having_expr1_eval[:virtual_plan.having_expr1_eval.index(')')+1], str(ans))
-                print(tmpEvalS)
+                #print(tmpEvalS)
                 if virtual_plan.having_expr2_eval == None:
                     if eval(tmpEvalS):  # 天才？！这是不是就是SQL注入啊？
                         valid_groupAttr_set.add(aggr_attr_value)
@@ -926,11 +986,11 @@ def mem_exec(sql):
                 if aggr_attr_value in valid_groupAttr_set:
                     tmpList = []
                     for tu in virtual_plan.queryAttr:
-                        print("tu is", tu)
+                        #print("tu is", tu)
                         if tu[2] == '': #group by
                             tmpList.append(aggr_attr_value)
                         else:   #手动聚合
-                            print("start argc:", grpMP[aggr_attr_value], tu[2], tu[0]+'.'+tu[1])
+                            #print("start argc:", grpMP[aggr_attr_value], tu[2], tu[0]+'.'+tu[1])
                             tmpList.append(aggr_row_func(grpMP[aggr_attr_value], tu[2], tu[0]+'.'+tu[1]))
                     table.add_row(tmpList)
             
@@ -1006,6 +1066,7 @@ def engine():
                 f.write(traceback.format_exc())
                 f.write("\n")
             #print("sql runtime error:", e)
+            print("A bad query happened, dont worry, we will clean its impact now.")
             print("Start cleaning dirty cache, rollback to commit previous sql...")
             lazyDropRelationList.clear()
             dirty_cache_rollback_and_commit()

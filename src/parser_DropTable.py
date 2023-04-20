@@ -18,7 +18,7 @@ class DropListener(SQLiteParserListener):
         logging.debug(self.plan.table_name)
         return super().enterDrop_stmt(ctx)
 
-def virtual_plan_drop(sql):
+def virtual_plan_create(sql):
     logging.debug(sql)
     input_stream = InputStream(sql)
     lexer = SQLiteLexer(input_stream)
@@ -33,6 +33,9 @@ def virtual_plan_drop(sql):
 def main():
     sql = """
         DROP TABLE customer_name;
+    """
+    sql2 = """
+        DROP TABLE orders;
     """
     input_stream = InputStream(sql)
     lexer = SQLiteLexer(input_stream)
