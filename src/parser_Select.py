@@ -127,7 +127,7 @@ class SelectListener(SQLiteParserListener):
 
         # get where
         if ctx.whereExpr != None:
-            print(ctx.whereExpr.getText())
+            #print(ctx.whereExpr.getText())
             self.plan.where_expr = ctx.whereExpr.getText()
             whereExprCtx = ctx.whereExpr
             if str(whereExprCtx.AND_()) == 'AND':
@@ -135,7 +135,7 @@ class SelectListener(SQLiteParserListener):
             elif str(whereExprCtx.OR_()) == 'OR':
                 self.plan.where_logic = 'or'
 
-            print(self.plan.where_logic)
+            #print(self.plan.where_logic)
 
             if self.plan.where_logic != None:
                 self.plan.where_expr1_eval = self.plan.where_expr[:self.plan.where_expr.index(self.plan.where_logic.upper())]
@@ -146,12 +146,12 @@ class SelectListener(SQLiteParserListener):
             # = -> ==   
             s1 = self.plan.where_expr1_eval
             s2 = self.plan.where_expr2_eval
-            print(s1,s2)
+            #print(s1,s2)
             if '!' not in s1 and '<' not in s1 and '>' not in s1 and '=' in s1:
                 self.plan.where_expr1_eval = self.plan.where_expr1_eval.replace('=', '==')
             if s2 != None and '!' not in s2 and '<' not in s2 and '>' not in s2 and '=' in s2:
                 self.plan.where_expr2_eval = self.plan.where_expr2_eval.replace('=', '==')
-            print(self.plan.where_expr1_eval)
+            #print(self.plan.where_expr1_eval)
         # where done?
 
         # get join, if join table_or_subquery==[]
