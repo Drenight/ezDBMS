@@ -274,7 +274,7 @@ def virtual_plan_create(sql):
 
 def main():
     sql0 = """
-        SELECT * FROM ptr;
+        SELECT tst.id, tst.num FROM tst WHERE tst.id>7 AND tst.id < 5;
     """
     # only for parsing
     sql1 = """
@@ -299,7 +299,7 @@ def main():
         SELECT * FROM id2salary WHERE id2salary.salary>=1500;
     """
     sql8 = """
-        SELECT * FROM id2salary WHERE id2salary.salary=1500 OR id2salary.id=707;
+        SELECT * FROM id2salary WHERE id2salary.salary>1500 AND id2salary.id<=1000;
     """
     sql9 = """
         SELECT min(id2salary.id), min(id2salary.salary) FROM id2salary WHERE id2salary.id=707 AND id2salary.salary>=1000 GROUP BY id2salary.id HAVING MIN(id2salary.salary)>=1500 OR MIN(id2salary.salary)<2000;
@@ -318,7 +318,20 @@ def main():
     # bug fixed at "ans1 = baseDBDict[rela2][uu2][join_attr1]"
     # commit 7250162
     sql13 = """
-        SELECT customer_name.id, customer_name.customer_name, orders.id, orders.customer_id FROM customer_name INNER JOIN orders ON customer_name.id = orders.customer_id;
+        SELECT 
+        customer_name.id, MIN(customer_name.customer_name), MIN(orders.id), MIN(orders.customer_id) 
+        FROM 
+        customer_name 
+        INNER JOIN 
+        orders 
+        ON 
+        customer_name.id = orders.customer_id 
+        WHERE
+        orders.id>0 AND orders.id>=1000
+        GROUP BY 
+        customer_name.id 
+        HAVING 
+        MIN(orders.customer_id)>=0 OR MIN(orders.customer_id)=1;
     """
 
     input_stream = InputStream(sql11)

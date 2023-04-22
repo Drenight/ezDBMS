@@ -74,6 +74,14 @@ def virtual_plan_create(sql):
     return listener.plan
 
 def main():
+    # test treap
+    sql0 = """
+        CREATE TABLE tst (
+        id int PRIMARY KEY,
+        num int
+        );
+    """
+
     sql = """
         CREATE TABLE customer_name (
         id int PRIMARY KEY,

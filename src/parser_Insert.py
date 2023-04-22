@@ -55,6 +55,11 @@ def virtual_plan_create(sql):
     return listener.plan
 
 def main():
+    sql0 = """
+        INSERT INTO tst (id, num)
+        VALUES (275, 122);
+    """
+
     sql = """
         INSERT INTO ptr (id, name)
         VALUES (122, 'Alice');

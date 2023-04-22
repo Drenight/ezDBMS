@@ -41,9 +41,29 @@ A- (90-38)/0.6=86
 - 过一遍Implementation ppt
 
 得上个系统的测试
+- 大小写之类的把坑排了
 
 优先级参考879095100就好，最乐观还有一周
 
 有空把index支持完整
 
 重构？估计没空
+
+## 0421
+条件排序总觉得是个裸的平衡树rank，这b树又不支持
+- 自己写treap比较solid工作量大
+- 经验方法不solid工作量小
+
+写了treap，给where上了条件优化了，这种办法having上不了估计，因为没索引
+- 底层create_index重用了，想把这个优化用满的话CREATE/DROP INDEX需要parse一下
+
+join还没考虑，ppt如果要提的话22号得想一想
+
+还要做的事，大概优先级：
+- join优化
+- order by / limit
+- 聚合函数补齐 max,avg,count,distinct?
+- CREATE/DROP INDEX parser
+- 测试
+- canned
+- 索引开关
