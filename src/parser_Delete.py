@@ -59,7 +59,7 @@ def virtual_plan_create(sql):
 
 def main():
     sql = """
-        DELETE FROM customer_name WHERE customer_name.id=1 AND customer_name.customer_name='Alice';
+        DELETE FROM customer_name WHERE customer_name.id=7 AND customer_name.customer_name='Bob';
     """
     sql2 = """
         DELETE FROM orders WHERE orders.id=1 AND orders.customer_id=1;
