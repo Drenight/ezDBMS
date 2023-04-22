@@ -399,7 +399,7 @@ def judge_row(row_uu, virtual_plan):
         tmpEvalS1 = virtual_plan.where_expr1_eval.replace(virtual_plan.where_expr1_eval[:brkAttrNameIndex1], str(ans1_where_no_join))
         tmpEvalS2 = virtual_plan.where_expr2_eval.replace(virtual_plan.where_expr2_eval[:brkAttrNameIndex2], str(ans2_where_no_join))
         logging.debug("ok double where without join: "+str(tmpEvalS1)+" "+str(tmpEvalS2))
-        if eval(str(eval(tmpEvalS1))+" "+str(virtual_plan.where_logic)+" "+str(eval(tmpEvalS2))):
+        if eval(tmpEvalS1+" "+str(virtual_plan.where_logic)+" "+tmpEvalS2):
             return True
 
 #del by uu
@@ -843,7 +843,8 @@ def mem_exec(sql):
                     tmpEvalS1 = virtual_plan.where_expr1_eval.replace(virtual_plan.where_expr1_eval[:brkAttrNameIndex1], str(ans1_where_no_join))
                     tmpEvalS2 = virtual_plan.where_expr2_eval.replace(virtual_plan.where_expr2_eval[:brkAttrNameIndex2], str(ans2_where_no_join))
                     logging.debug("ok double where without join: "+str(tmpEvalS1)+" "+str(tmpEvalS2))
-                    if eval(str(eval(tmpEvalS1))+" "+str(virtual_plan.where_logic)+" "+str(eval(tmpEvalS2))):
+                    #if eval(str(eval(tmpEvalS1))+" "+str(virtual_plan.where_logic)+" "+str(eval(tmpEvalS2))):
+                    if eval(tmpEvalS1+" "+str(virtual_plan.where_logic)+" "+tmpEvalS2):
                         for attr in mpAttr[rela]:
                             mpAttr[rela][attr].append(baseDBDict[rela][row_uu][attr])
                         row_cnt += 1
@@ -904,7 +905,7 @@ def mem_exec(sql):
                         else:
                             tmpEvalS2 = "True"
                         logging.debug("ok double where without join: "+str(tmpEvalS1)+" "+str(tmpEvalS2))
-                        if eval(str(eval(tmpEvalS1))+" "+str(virtual_plan.where_logic)+" "+str(eval(tmpEvalS2))):
+                        if eval(tmpEvalS1+" "+str(virtual_plan.where_logic)+" "+tmpEvalS2):
                             if rela_now == rela1: 
                                 join_uu_list1.append(row_uu)
                                 row_cnt1 += 1
