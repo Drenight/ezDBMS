@@ -21,9 +21,12 @@ import parser_DropTable
 import parser_Delete
 import parser_Update
 
+from Treap import treap
+
 ############################### Core Mem Data Structure & magic number config #############
 baseDBDict = {}                         # [relation][uuid:173]  -> {id:7, salary:1000}
 BTreeDict = {}                          # [relation][attribute] -> BTree, each key map to a set, set stores uuids, uuid points to the row
+TreapDict = {}                          # [relation][attribute] -> Treap_root, store only key
 metaDict = {}                           # [relation]            -> {id:int, name:str}
 constraintDict = {}      #TODO 0->1     # [relation]            -> {primary: attr, foreign0:[{attr:, rela2:, attr2:},...], foreign1:[{attr:, rela2:, attr2:},...]}
 
@@ -31,7 +34,7 @@ snapShotInterVal = 1
 tmpSQLLog = []
 lazyDropRelationList = []
 
-conditionOptimizerFlag = False
+conditionOptimizerFlag = True  # only support int index
 joinOptimizerFlag = False
 
 ############################### dev tools, for debug and log ###############################
@@ -108,6 +111,16 @@ def persist_snapshot():
             with open(file_name, 'wb') as f:
                 pickle.dump(btree, f)
 
+    # persist treap
+    for relation in TreapDict:
+        for attr in TreapDict[relation]:
+            treap = TreapDict[relation][attr]
+            file_name = getTreapFileName(relation, attr)
+            dir_name = os.path.dirname(file_name)
+            os.makedirs(dir_name, exist_ok=True)
+            with open(file_name, 'wb') as f:
+                pickle.dump(treap, f)
+
     #persist constraint
     for relation in constraintDict:
         with open(getConstraintFileName(relation), 'wb') as f:
@@ -157,7 +170,23 @@ def load_snapshot():
                 #print(BTreeDict[relation][attr])
     logging.debug("Successfully load BTreeDict " + str(BTreeDict))
     #print(BTreeDict["ptr"]["id"]["909"])
-            
+
+    # load treap
+    treap_path = 'treap/'
+    for dir_path, sub_dirs, files in os.walk(treap_path):
+        relation = dir_path[6:]
+        if relation == "": # root, nothing
+            continue
+        TreapDict.setdefault(relation, {})
+        for file_name in files:
+            file_path = os.path.join(dir_path, file_name)
+            #print(dir_path, sub_dirs, files, file_path)
+            attr = file_name[:-6]
+            with open(file_path, 'rb') as f:
+                treap = pickle.load(f)
+                TreapDict[relation].setdefault(attr, treap)
+    logging.debug("Successfully load TreapDict " + str(TreapDict))
+
     #load constraint
     constraint_path = 'constraint/'
     constraint_files = glob.glob(os.path.join(constraint_path, '*.constrain'))
@@ -175,6 +204,8 @@ def getBaseDBFileName(relationName):
     return "baseDB/"+relationName+".csv"
 def getBTreeFileName(relationName, attributeName):
     return "btree/"+relationName+"/"+attributeName+".btree"
+def getTreapFileName(relationName, attributeName):
+    return "treap/"+relationName+"/"+attributeName+".treap"
 def getConstraintFileName(relationName):
     return "constraint/"+relationName+".constrain"
 
@@ -187,12 +218,12 @@ def loadRelationMeta(meta_file):
         meta_dict[name] = data_type
     return meta_dict
 
-def load_BTree(relationName, attributeName):
-    if not os.path.isfile(getBTreeFileName(relationName, attributeName)):
-        return OOBTree()
-    else:
-        with open(getBTreeFileName(relationName, attributeName), 'rb') as file:
-            return dill.load(file)
+#def load_BTree(relationName, attributeName):
+#    if not os.path.isfile(getBTreeFileName(relationName, attributeName)):
+#        return OOBTree()
+#    else:
+#        with open(getBTreeFileName(relationName, attributeName), 'rb') as file:
+#            return dill.load(file)
 
 def load_BaseDB(relationName):
     if not os.path.isfile(getBaseDBFileName(relationName)):       
@@ -220,34 +251,37 @@ def create_table(relationName, cmd):
 def drop_table(relationName):
     lazyDropRelationList.append(relationName)
     del baseDBDict[relationName]
-    if relationName in BTreeDict.keys():    #不能爆，万一没呢，兼容下吧虽然默认带主键了
+    if relationName in BTreeDict.keys():    #不能爆，万一没呢，兼容下不带主键建表吧虽然默认带主键了
         del BTreeDict[relationName]
+    if relationName in TreapDict.keys():
+        del TreapDict[relationName]
     del metaDict[relationName]
 
-    if 'foreign0' in constraintDict[relationName].keys():
-        constrainMpList = constraintDict[relationName]['foreign0']
-        toDelMp = []
+    if relationName in constraintDict.keys():
+        if 'foreign0' in constraintDict[relationName].keys():
+            constrainMpList = constraintDict[relationName]['foreign0']
+            toDelMp = []
 
-        for constrainMP in constrainMpList:
-            attr = constrainMP['attr']
-            rela2 = constrainMP['rela2']
-            attr2 = constrainMP['attr2']
-            for constrainMP2 in constraintDict[rela2]['foreign1']:
-                if constrainMP2['attr'] == attr2 and constrainMP2['rela2'] == relationName and constrainMP2['attr2'] == attr:
-                    toDelMp.append(constrainMP2)
-            for constrainMP2 in toDelMp:
-                constraintDict[rela2]['foreign1'].remove(constrainMP2)
-            if len(constraintDict[rela2]['foreign1']) == 0:
-                del constraintDict[rela2]['foreign1']
-            logging.debug("Should have clean arrow head, rela2 is:"+rela2+" "+str(constraintDict[rela2]))
+            for constrainMP in constrainMpList:
+                attr = constrainMP['attr']
+                rela2 = constrainMP['rela2']
+                attr2 = constrainMP['attr2']
+                for constrainMP2 in constraintDict[rela2]['foreign1']:
+                    if constrainMP2['attr'] == attr2 and constrainMP2['rela2'] == relationName and constrainMP2['attr2'] == attr:
+                        toDelMp.append(constrainMP2)
+                for constrainMP2 in toDelMp:
+                    constraintDict[rela2]['foreign1'].remove(constrainMP2)
+                if len(constraintDict[rela2]['foreign1']) == 0:
+                    del constraintDict[rela2]['foreign1']
+                logging.debug("Should have clean arrow head, rela2 is:"+rela2+" "+str(constraintDict[rela2]))
 
-    if 'foreign1' in constraintDict[relationName].keys():
-        relaS = ""
-        for constrainMP in constraintDict[relationName]['foreign1']:
-            relaS += str(constrainMP['rela2'])+'\n'
-        raise ForeignKeyError('This relation\'s primary key is still a reference key in these relations:\n' + relaS +'Cant drop now.')
+        if 'foreign1' in constraintDict[relationName].keys():
+            relaS = ""
+            for constrainMP in constraintDict[relationName]['foreign1']:
+                relaS += str(constrainMP['rela2'])+'\n'
+            raise ForeignKeyError('This relation\'s primary key is still a reference key in these relations:\n' + relaS +'Cant drop now.')
 
-    del constraintDict[relationName]
+        del constraintDict[relationName]
 
 # DONE 主键外键约束，底层模块做
 def write_row(relationName, cmd):
@@ -283,7 +317,7 @@ def write_row(relationName, cmd):
                 rela2 = foreign_mp['rela2']
                 attr2 = foreign_mp['attr2']
                 attr = foreign_mp['attr']
-                if mp[attr] not in BTreeDict[rela2][attr2].keys():  #由于是箭头一定是主键，必定可以直接check b树
+                if mp[attr] not in BTreeDict[rela2][attr2].keys():  #由于是箭头一定是主键，必定可以直接check b树, attr2是主键
                     raise ForeignKeyError('New value didnt show in the referenced relation '+str(rela2)+'.'+str(attr2))
 
         # update base csv
@@ -301,6 +335,16 @@ def write_row(relationName, cmd):
                 if k not in btree.keys():
                     btree.setdefault(k, set())
                 btree[k].add(btree_value)
+
+        if relationName in TreapDict:
+            for index in TreapDict[relationName]:
+                treap_root = TreapDict[relationName][index]
+                k = inner_mp[index]
+                #if treap.find(treap_root, k) == 0:
+                TreapDict[relationName][index] = treap.insert(treap_root, k)
+                #if k not in btree.keys():
+                #    btree.setdefault(k, set())
+                #btree[k].add(btree_value)
 
         #print(btree[inner_mp[primaryKey]])
 
@@ -365,6 +409,11 @@ def del_row_using_uu_func(relationName, uu):
         BTreeDict[relationName][k][row_mp[k]].remove(uu)
         if len(BTreeDict[relationName][k][row_mp[k]]) == 0:
             del BTreeDict[relationName][k][row_mp[k]]
+    for k in TreapDict[relationName]:
+        treap_root = TreapDict[relationName][k]
+        #print(k, "attr")
+        #print()
+        TreapDict[relationName][k] = treap.delete(treap_root, row_mp[k])
     del baseDBDict[relationName][uu]
 def erase_row(virtual_plan):
     rela = virtual_plan.table_name
@@ -387,7 +436,7 @@ def erase_row(virtual_plan):
             attr2 = constrainMP['attr2']
             for row_uu in del_row_uu:
                 if attr2 in BTreeDict[rela2].keys():
-                    if baseDBDict[rela][row_uu][attr] in BTreeDict[rela2][attr2].keys():
+                    if baseDBDict[rela][row_uu][attr] in BTreeDict[rela2][attr2].keys(): #attr2是主键
                         cantDelPrimaryKeyList.append(str(baseDBDict[rela][row_uu][attr])+" in "+str(rela2)+"."+str(attr2))
                 else:
                     for row_uu2 in baseDBDict[rela2]:
@@ -436,6 +485,10 @@ def update_row(virtual_plan):
     #    if constraintDict[rela]['primary'] in virtual_plan.columnMp.keys():
     #额，甚至不用做了，改主键在最上面就check过了，也就是foreign1，箭头的变更被连带维护了
 
+    #...没写baseDB
+    for uu in upd_row_uu:
+        for attr in virtual_plan.columnMp.keys():
+            baseDBDict[rela][uu][attr] = virtual_plan.columnMp[attr]
 
 # ptr id 909
 # check if exists indexing(hash/btree), else O(n) scan
@@ -498,26 +551,36 @@ def query_range(relationName, cmd):
         print("Nothing found.")
 
 # optional, not maintained for a while, don't use directly
-def create_index(relationName, cmd):
-    indexAttr = cmd[0]
+# 0421 recycling
+def create_index(relationName, indexAttr):
+    #BTreeDict.setdefault(virtual_plan.table_name, {})
+    #BTreeDict[virtual_plan.table_name].setdefault(virtual_plan.primary_key, OOBTree())
     if relationName in BTreeDict.keys() and indexAttr in BTreeDict[relationName].keys():
         raiseErr("Index exists.")
     if relationName not in BTreeDict.keys():
         BTreeDict.setdefault(relationName, {})
+        TreapDict.setdefault(relationName, {})
     if indexAttr not in BTreeDict[relationName].keys():
         BTreeDict[relationName].setdefault(indexAttr, OOBTree())
+        TreapDict[relationName].setdefault(indexAttr, None)
     for uu in baseDBDict[relationName]:
         btree = BTreeDict[relationName][indexAttr]
+        treap_root = TreapDict[relationName][indexAttr]
+
         k = baseDBDict[relationName][uu][indexAttr]
+
         if k not in btree.keys():
             btree[k] = set()
         btree[k].add(uu)
-        logging.debug(BTreeDict[relationName][indexAttr][baseDBDict[relationName][uu][indexAttr]])
+        logging.debug("now btree set is " + str(BTreeDict[relationName][indexAttr][baseDBDict[relationName][uu][indexAttr]]))
+
+        TreapDict[relationName][indexAttr] = treap.insert(treap_root, k)
+        logging.debug("in treap, k shows " +str(treap.find(treap_root, k)))
 
 # 下面两个操作真正实现约束在增删改，因为只会在建表调用他们
 # 由于这个操作只在建表有，这里不做重复值检测
 # 涉及加主键列
-def create_primary(relationName, attr):
+def create_primary_cons(relationName, attr):
     logging.debug("relation Name: "+str(relationName)+"attr: "+str(attr))
     if relationName not in constraintDict.keys():
         constraintDict.setdefault(relationName, {})
@@ -531,7 +594,7 @@ def create_primary(relationName, attr):
 # rela1：涉及加外键列
 # rela2：涉及删主键列
 # relationName[attr] -> rela2[attr2]
-def create_foreign(relationName, attr, rela2, attr2):
+def create_foreign_cons(relationName, attr, rela2, attr2):
     logging.debug("rela1: "+str(relationName)+"attr1: "+str(attr)+"rela2: "+str(rela2)+"attr2: "+str(attr2))
     if rela2 not in constraintDict.keys():
         raiseErr("Didn't find " + str(rela2) + " has primary key constrains, or it does'nt exist at all")
@@ -574,6 +637,29 @@ def aggr_row_func(rowList, aggr_func, target_attr):  # row is a list of {'id2sal
     
     return ret
 
+def satisfy_condition_optimizer(where_expr1_rela, where_expr1_attr, where_expr2_rela, where_expr2_attr):
+    if conditionOptimizerFlag:
+        if metaDict[where_expr1_rela][where_expr1_attr]=='int' and metaDict[where_expr2_rela][where_expr2_attr]=='int':
+            return True
+    return False
+
+def calc_rows_by_treap(rela, attr, op, val):
+    # TreapDict[rela][attr]
+    if rela not in TreapDict.keys() or attr not in TreapDict[rela].keys() or TreapDict[rela][attr]==None:
+        return -1
+    if op == '=':
+        return treap.find(TreapDict[rela][attr], val)
+    if op == '<':
+        return treap.rank(TreapDict[rela][attr], val)
+    if op == '<=':
+        return treap.rank(TreapDict[rela][attr], val+1)
+    if op == '>':
+        return TreapDict[rela][attr].sub_tree_size - treap.rank(TreapDict[rela][attr], val+1)
+    if op == '>=':
+        return TreapDict[rela][attr].sub_tree_size - treap.rank(TreapDict[rela][attr], val)
+    if op == '!=':
+        return TreapDict[rela][attr].sub_tree_size - treap.find(TreapDict[rela][attr], val)
+
 def mem_exec(sql):
     op = 999
     # create table 
@@ -588,12 +674,14 @@ def mem_exec(sql):
             lst.append(pr['type'])
         create_table(virtual_plan.table_name, lst)
         if virtual_plan.primary_key:
-            create_primary(virtual_plan.table_name, virtual_plan.primary_key)                       #promise, single attr
+            create_primary_cons(virtual_plan.table_name, virtual_plan.primary_key)                       #promise, single attr
             # 只需要注册就行，不需要调用creat_index，因为baseDB没东西
-            BTreeDict.setdefault(virtual_plan.table_name, {})
-            BTreeDict[virtual_plan.table_name].setdefault(virtual_plan.primary_key, OOBTree())
+            # 0421，兼容treap，重用create_index
+            create_index(virtual_plan.table_name, virtual_plan.primary_key)
+            #BTreeDict.setdefault(virtual_plan.table_name, {})
+            #BTreeDict[virtual_plan.table_name].setdefault(virtual_plan.primary_key, OOBTree())
         if virtual_plan.foreign_key:
-            create_foreign(
+            create_foreign_cons(
             virtual_plan.table_name, virtual_plan.foreign_key["local_columns"][0], 
             virtual_plan.foreign_key["table"], virtual_plan.foreign_key["foreign_columns"][0]
             )        #promise, single attr
@@ -634,6 +722,7 @@ def mem_exec(sql):
         logging.debug("virtual plan done, it's like: " + str(virtual_plan.__dict__))
 
         # 重复列的冗余优化？考虑删了
+        # 登记待填列
         mpAttr = {}
         for tu in virtual_plan.queryAttr:
             rela = tu[0]
@@ -680,8 +769,48 @@ def mem_exec(sql):
                 logging.debug("Second where expr rela&attr is "+str(where_expr2_rela)+"&"+str(where_expr2_attr))
             #ans = baseDBDict[rela][row_uu][where_expr1_attr]
 
+
+        # optimizer: condition
+        swap_expr_flag = False
+        if virtual_plan.where_expr != None and virtual_plan.where_expr2_eval != None:
+            if satisfy_condition_optimizer(where_expr1_rela, where_expr1_attr, where_expr2_rela, where_expr2_attr):
+                row_cnt_satisfy_expr1 = -1
+                row_cnt_satisfy_expr2 = -1
+                
+                op1 = virtual_plan.where_expr1_eval[brkAttrNameIndex1]
+                if virtual_plan.where_expr1_eval[brkAttrNameIndex1+1] == '=':
+                    op1 += '='
+                    val1 = int(virtual_plan.where_expr1_eval[brkAttrNameIndex1+2:])    
+                else:
+                    val1 = int(virtual_plan.where_expr1_eval[brkAttrNameIndex1+1:])
+
+                op2 = virtual_plan.where_expr2_eval[brkAttrNameIndex2]
+                if virtual_plan.where_expr2_eval[brkAttrNameIndex2+1] == '=':
+                    op2 += '='
+                    val2 = int(virtual_plan.where_expr2_eval[brkAttrNameIndex2+2:])
+                else:
+                    val2 = int(virtual_plan.where_expr2_eval[brkAttrNameIndex2+1:])
+
+                #print(op1, op2, val1, val2)
+                row_cnt_satisfy_expr1 = calc_rows_by_treap(where_expr1_rela, where_expr1_attr, op1, val1)
+                row_cnt_satisfy_expr2 = calc_rows_by_treap(where_expr2_rela, where_expr2_attr, op2, val2)
+                logging.debug("sats 1: "+str(row_cnt_satisfy_expr1))
+                logging.debug("sats 2: "+str(row_cnt_satisfy_expr2))
+                if row_cnt_satisfy_expr1 < row_cnt_satisfy_expr2:
+                    if virtual_plan.where_logic == 'or':
+                        swap_expr_flag = True
+                if row_cnt_satisfy_expr1 > row_cnt_satisfy_expr2:
+                    if virtual_plan.where_logic == 'and':
+                        swap_expr_flag = True
+
+        if swap_expr_flag:
+            virtual_plan.where_expr1_eval, virtual_plan.where_expr2_eval = virtual_plan.where_expr2_eval, virtual_plan.where_expr1_eval
+            # brkRelaNameIndex: won't use
+            where_expr1_rela, where_expr2_rela = where_expr2_rela, where_expr1_rela
+            where_expr1_attr, where_expr2_attr = where_expr2_attr, where_expr1_attr
+            # op: won't use
+
         row_cnt = 0
-        
         rela_list = list(mpAttr.keys())
         rela = rela_list[0]#for rela in mpAttr.keys():  # 就一个或者两个吧？？
         if virtual_plan.join_expr_eval == None: #tested
@@ -814,7 +943,6 @@ def mem_exec(sql):
                         #print("debugg,", rela1, rela2, join_rela1)
                         # debugg, customer_name orders orders
                         
-
                         if join_rela1 == rela1:
                             ans1 = baseDBDict[rela1][uu1][join_attr1]
                             ans2 = baseDBDict[rela2][uu2][join_attr2]
@@ -970,12 +1098,11 @@ def mem_exec(sql):
                 else:
                     ans2 = aggr_row_func(grpMP[aggr_attr_value], aggr_func2, target_attr2)
                     tmpEvalS2 = virtual_plan.having_expr2_eval.replace(virtual_plan.having_expr2_eval[:virtual_plan.having_expr2_eval.index(')')+1], str(ans2))
-                    logging.debug("conditions: "+ str(tmpEvalS) + str(tmpEvalS2))
-                    if not conditionOptimizerFlag:
-                        if eval(str(eval(tmpEvalS))+" "+virtual_plan.having_logic+" "+str(eval(tmpEvalS2))):
-                            valid_groupAttr_set.add(aggr_attr_value)
-                    else:   # 条件优化
-                        pass
+                    logging.debug("conditions: "+ str(tmpEvalS) +" "+str(virtual_plan.having_logic) +" "+str(tmpEvalS2))
+                    
+                    # having上不了条件优化了，用的treap
+                    if eval(str(eval(tmpEvalS))+" "+virtual_plan.having_logic+" "+str(eval(tmpEvalS2))):
+                        valid_groupAttr_set.add(aggr_attr_value)
 
                 #final_list.append(grpMP)
             logging.debug("valid_groupAttr_set is: " + str(valid_groupAttr_set))
@@ -1023,6 +1150,7 @@ def dirty_cache_rollback_and_commit():
     metaDict.clear()
     baseDBDict.clear()
     BTreeDict.clear()
+    TreapDict.clear()
     constraintDict.clear()
     load_snapshot()
     for query in tmpSQLLog:
@@ -1035,10 +1163,17 @@ def lazy_file_del():
         baseF = getBaseDBFileName(rela)
         consF = getConstraintFileName(rela)
         btreDir = "btree/"+rela
-        os.remove(metaF)
-        os.remove(baseF)
-        os.remove(consF)
-        shutil.rmtree(btreDir)
+        trepDir = "treap/"+rela
+        if os.path.exists(metaF):
+            os.remove(metaF)
+        if os.path.exists(baseF):
+            os.remove(baseF)
+        if os.path.exists(consF):
+            os.remove(consF)
+        if os.path.exists(btreDir):
+            shutil.rmtree(btreDir)
+        if os.path.exists(trepDir):
+            shutil.rmtree(trepDir)
 
 def engine():
     load_snapshot()
@@ -1050,7 +1185,7 @@ def engine():
 
         # start work
         print("==============================================================================")
-        print("Waiting for your sql, input quit to exit without cmd+C...")
+        print("Waiting for your sql, input quit; to exit without cmd+C...")
         print(">",end='')
         sql = read_sql()
         if sql == "quit;":
