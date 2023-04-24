@@ -9,8 +9,10 @@ import time
 import pickle
 import shutil
 import logging
+import threading
 import traceback
 from prettytable import PrettyTable
+from tqdm import tqdm
 from BTrees.OOBTree import OOBTree
 
 # my parsers
@@ -37,6 +39,9 @@ lazyDropRelationList = []
 conditionOptimizerFlag = True  # only support int index
 joinOptimizerFlag = False
 
+sys.setrecursionlimit(10000000)
+threading.stack_size(67108864)
+
 ############################### dev tools, for debug and log ###############################
 # create a formatter that prints ERROR messages in red
 class ColoredFormatter(logging.Formatter):
@@ -46,7 +51,7 @@ class ColoredFormatter(logging.Formatter):
         return super(ColoredFormatter, self).format(record)
 
 # configure the root logger to handle all log levels
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.ERROR)
 
 # create a console handler and set its formatter to the colored formatter
 console_handler = logging.StreamHandler()
@@ -135,7 +140,7 @@ def load_snapshot():
         relation = f[:-5]
         attr_dict = loadRelationMeta("meta/" + f)
         metaDict.setdefault(relation, attr_dict)
-    logging.debug("Successfully load metaDict " + str(metaDict))
+    #logging.debug("Successfully load metaDict " + str(metaDict))
 
     # load baseDB
     baseDB_path = 'baseDB/'
@@ -151,7 +156,7 @@ def load_snapshot():
                 lst = row[1:]
                 inner_mp = base_lst2mp(relation, lst)
                 baseDBDict[relation].setdefault(uuid, inner_mp)
-    logging.debug("Successfully load baseDBDict " + str(baseDBDict))
+    #logging.debug("Successfully load baseDBDict " + str(baseDBDict))
 
     # load btree
     btree_path = 'btree/'
@@ -168,7 +173,7 @@ def load_snapshot():
                 btree = pickle.load(f)
                 BTreeDict[relation].setdefault(attr, btree)
                 #print(BTreeDict[relation][attr])
-    logging.debug("Successfully load BTreeDict " + str(BTreeDict))
+    #logging.debug("Successfully load BTreeDict " + str(BTreeDict))
     #print(BTreeDict["ptr"]["id"]["909"])
 
     # load treap
@@ -185,7 +190,7 @@ def load_snapshot():
             with open(file_path, 'rb') as f:
                 treap = pickle.load(f)
                 TreapDict[relation].setdefault(attr, treap)
-    logging.debug("Successfully load TreapDict " + str(TreapDict))
+    #logging.debug("Successfully load TreapDict " + str(TreapDict))
 
     #load constraint
     constraint_path = 'constraint/'
@@ -196,7 +201,7 @@ def load_snapshot():
         with open(getConstraintFileName(relation), 'rb') as file:
             mp = pickle.load(file)
             constraintDict.setdefault(relation, mp)
-    logging.debug("Successfully load constraintDict " + str(constraintDict))
+    #logging.debug("Successfully load constraintDict " + str(constraintDict))
     
 def getMetaFileName(relationName):
     return "meta/"+relationName+".meta"
@@ -660,7 +665,11 @@ def calc_rows_by_treap(rela, attr, op, val):
     if op == '!=':
         return TreapDict[rela][attr].sub_tree_size - treap.find(TreapDict[rela][attr], val)
 
+parsing_consume = 0
+storage_consume = 0
 def mem_exec(sql):
+    global parsing_consume
+    global storage_consume    
     op = 999
     # create table 
     # CREATE TABLE TTT(ID INT PRIMARY KEY);
@@ -692,7 +701,10 @@ def mem_exec(sql):
         drop_table(virtual_plan.table_name)
 
     elif sql.upper().find("INSERT INTO") != -1:
+        tmp = time.time()
         virtual_plan = parser_Insert.virtual_plan_create(sql)
+        parsing_consume += time.time()-tmp
+
         logging.debug(virtual_plan.__dict__)    # {'table_name': 'students', 'columnsKey': ['id', 'name', 'gender', 'age', 'score'], 'columnsValue': [1, 'Alice', 'F', 18, 95], 'asName': 'qq'}
         op_list = []
         if len(virtual_plan.columnsKey) != len(virtual_plan.columnsValue):
@@ -700,7 +712,9 @@ def mem_exec(sql):
         for i in range(len(virtual_plan.columnsKey)):
             #op_list.append(virtual_plan.columnsKey[i])
             op_list.append(virtual_plan.columnsValue[i])
+        tmp2 = time.time()
         write_row(virtual_plan.table_name, op_list)
+        storage_consume += time.time()-tmp2
     
     elif sql.upper().find("DELETE FROM") != -1:
         virtual_plan = parser_Delete.virtual_plan_create(sql)
@@ -805,7 +819,8 @@ def mem_exec(sql):
 
         if swap_expr_flag:
             virtual_plan.where_expr1_eval, virtual_plan.where_expr2_eval = virtual_plan.where_expr2_eval, virtual_plan.where_expr1_eval
-            # brkRelaNameIndex: won't use
+            brkRelaNameIndex1, brkRelaNameIndex2 = brkRelaNameIndex2, brkRelaNameIndex1
+            brkAttrNameIndex1, brkAttrNameIndex2 = brkAttrNameIndex2, brkAttrNameIndex1 
             where_expr1_rela, where_expr2_rela = where_expr2_rela, where_expr1_rela
             where_expr1_attr, where_expr2_attr = where_expr2_attr, where_expr1_attr
             # op: won't use
@@ -917,8 +932,8 @@ def mem_exec(sql):
             logging.debug("join_uu_list2: " + str(join_uu_list2))
             # last, filter pairs
             if not joinOptimizerFlag:
-                for uu1 in join_uu_list1:
-                    for uu2 in join_uu_list2:
+                for uu1 in tqdm(join_uu_list1):
+                    for uu2 in tqdm(join_uu_list2, leave=False):
                         join_expr = virtual_plan.join_expr_eval
                         match = re.search("(<=|>=|==|!=|<|>)", join_expr)
                         logic = match.group()
@@ -1192,7 +1207,6 @@ def engine():
         if sql == "quit;":
             print("Bye!")
             exit(0)
-
         st_time = time.time()
         try:
             mem_exec(sql)
@@ -1219,7 +1233,32 @@ def engine():
             tmpSQLLog.clear()
             print("Periodcally persists done, all previous sql committed!")
 
-def main():
-    engine()
+def main(canned_query_file):
+    if canned_query_file == None:
+        engine()
+    else:
+        try:
+            st_time = time.time()
+            load_snapshot()
+            tot = 0
+            with open(canned_query_file, 'r') as f:
+                for line in tqdm(f, desc="Processing lines"):
+                    tmp = time.time()
+                    mem_exec(line)
+                    tot += time.time()-tmp
+        except Exception as e:
+            err_logger.error(f"sql runtime error: {type(e)}: {e}")
+            exit(1)
+    lazy_file_del()
+    persist_snapshot()
+    print("Time consumed:",time.time()-st_time,"seconds.")
+    print("Successfuly completed, bye!")
+    print("exact running consume", tot)
+    print("parsing:",parsing_consume)
+    print("storage:",storage_consume)
 
-main()
+if __name__ == '__main__':
+    if len(sys.argv) == 2:
+        main(sys.argv[1])
+    else:
+        main(None)
