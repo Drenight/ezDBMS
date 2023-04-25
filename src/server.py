@@ -36,7 +36,7 @@ snapShotInterVal = 1
 tmpSQLLog = []
 lazyDropRelationList = []
 
-conditionOptimizerFlag = True  # only support int index
+conditionOptimizerFlag = False  # only support int index
 joinOptimizerFlag = False
 
 sys.setrecursionlimit(10000000)
@@ -55,7 +55,7 @@ logging.basicConfig(level=logging.ERROR)
 
 # create a console handler and set its formatter to the colored formatter
 console_handler = logging.StreamHandler()
-console_handler.setLevel(logging.ERROR)
+console_handler.setLevel(logging.DEBUG)
 console_handler.setFormatter(ColoredFormatter('%(levelname)s: %(message)s'))
 
 # add the console handler to the root logger
@@ -652,7 +652,7 @@ def calc_rows_by_treap(rela, attr, op, val):
     # TreapDict[rela][attr]
     if rela not in TreapDict.keys() or attr not in TreapDict[rela].keys() or TreapDict[rela][attr]==None:
         return -1
-    if op == '=':
+    if op == '==':
         return treap.find(TreapDict[rela][attr], val)
     if op == '<':
         return treap.rank(TreapDict[rela][attr], val)
@@ -806,14 +806,16 @@ def mem_exec(sql):
                     val2 = int(virtual_plan.where_expr2_eval[brkAttrNameIndex2+1:])
 
                 #print(op1, op2, val1, val2)
-                row_cnt_satisfy_expr1 = calc_rows_by_treap(where_expr1_rela, where_expr1_attr, op1, val1)
-                row_cnt_satisfy_expr2 = calc_rows_by_treap(where_expr2_rela, where_expr2_attr, op2, val2)
+                row_cnt_satisfy_expr1 = int(calc_rows_by_treap(where_expr1_rela, where_expr1_attr, op1, val1))
+                row_cnt_satisfy_expr2 = int(calc_rows_by_treap(where_expr2_rela, where_expr2_attr, op2, val2))
                 logging.debug("sats 1: "+str(row_cnt_satisfy_expr1))
                 logging.debug("sats 2: "+str(row_cnt_satisfy_expr2))
-                if row_cnt_satisfy_expr1 < row_cnt_satisfy_expr2:
+                if row_cnt_satisfy_expr1 == -1 or row_cnt_satisfy_expr2 == -1:
+                    pass
+                elif row_cnt_satisfy_expr1 < row_cnt_satisfy_expr2:
                     if virtual_plan.where_logic == 'or':
                         swap_expr_flag = True
-                if row_cnt_satisfy_expr1 > row_cnt_satisfy_expr2:
+                elif row_cnt_satisfy_expr1 > row_cnt_satisfy_expr2:
                     if virtual_plan.where_logic == 'and':
                         swap_expr_flag = True
 
@@ -845,24 +847,37 @@ def mem_exec(sql):
                             mpAttr[rela][attr].append(baseDBDict[rela][row_uu][attr])
                         row_cnt += 1
                 else:   # double expr && no join
-                    #ans1_where_no_join = baseDBDict[where_expr1_rela][row_uu][where_expr1_attr]
-                    #ans2_where_no_join = baseDBDict[where_expr2_rela][row_uu][where_expr2_attr]
-
                     ans1_where_no_join = baseDBDict[where_expr1_rela][row_uu][where_expr1_attr]
                     if metaDict[where_expr1_rela][where_expr1_attr] == 'str':
                         ans1_where_no_join = '\''+ans1_where_no_join+'\''
-                    ans2_where_no_join = baseDBDict[where_expr2_rela][row_uu][where_expr2_attr]
-                    if metaDict[where_expr2_rela][where_expr2_attr] == 'str':
-                        ans2_where_no_join = '\''+ans2_where_no_join+'\''
-
                     tmpEvalS1 = virtual_plan.where_expr1_eval.replace(virtual_plan.where_expr1_eval[:brkAttrNameIndex1], str(ans1_where_no_join))
-                    tmpEvalS2 = virtual_plan.where_expr2_eval.replace(virtual_plan.where_expr2_eval[:brkAttrNameIndex2], str(ans2_where_no_join))
-                    logging.debug("ok double where without join: "+str(tmpEvalS1)+" "+str(tmpEvalS2))
+                    if eval(tmpEvalS1):
+                        if virtual_plan.where_logic == 'or':
+                            for attr in mpAttr[rela]:
+                                mpAttr[rela][attr].append(baseDBDict[rela][row_uu][attr])
+                        else:   # and
+                            ans2_where_no_join = baseDBDict[where_expr2_rela][row_uu][where_expr2_attr]
+                            if metaDict[where_expr2_rela][where_expr2_attr] == 'str':
+                                ans2_where_no_join = '\''+ans2_where_no_join+'\''
+                            tmpEvalS2 = virtual_plan.where_expr2_eval.replace(virtual_plan.where_expr2_eval[:brkAttrNameIndex2], str(ans2_where_no_join))
+                            if eval(tmpEvalS2):
+                                for attr in mpAttr[rela]:
+                                    mpAttr[rela][attr].append(baseDBDict[rela][row_uu][attr])
+                    else:   # tmpEvalS1 is False
+                        if virtual_plan.where_logic == 'or':
+                            ans2_where_no_join = baseDBDict[where_expr2_rela][row_uu][where_expr2_attr]
+                            if metaDict[where_expr2_rela][where_expr2_attr] == 'str':
+                                ans2_where_no_join = '\''+ans2_where_no_join+'\''
+                            tmpEvalS2 = virtual_plan.where_expr2_eval.replace(virtual_plan.where_expr2_eval[:brkAttrNameIndex2], str(ans2_where_no_join))
+                            if eval(tmpEvalS2):
+                                for attr in mpAttr[rela]:
+                                    mpAttr[rela][attr].append(baseDBDict[rela][row_uu][attr])
+                    #logging.debug("ok double where without join: "+str(tmpEvalS1)+" "+str(tmpEvalS2))
                     #if eval(str(eval(tmpEvalS1))+" "+str(virtual_plan.where_logic)+" "+str(eval(tmpEvalS2))):
-                    if eval(tmpEvalS1+" "+str(virtual_plan.where_logic)+" "+tmpEvalS2):
-                        for attr in mpAttr[rela]:
-                            mpAttr[rela][attr].append(baseDBDict[rela][row_uu][attr])
-                        row_cnt += 1
+                    #if eval(tmpEvalS1+" "+str(virtual_plan.where_logic)+" "+tmpEvalS2):
+                    #    for attr in mpAttr[rela]:
+                    #        mpAttr[rela][attr].append(baseDBDict[rela][row_uu][attr])
+                    #    row_cnt += 1
         else:   #join, 叉积新表
             # 1. test row_uu and row_uu2 for where
             # 2. test join_expr
@@ -928,23 +943,22 @@ def mem_exec(sql):
                                 join_uu_list2.append(row_uu)
                                 row_cnt2 += 1
             
-            logging.debug("join_uu_list1: " + str(join_uu_list1))
-            logging.debug("join_uu_list2: " + str(join_uu_list2))
+            #logging.debug("join_uu_list1: " + str(join_uu_list1))
+            #logging.debug("join_uu_list2: " + str(join_uu_list2))
             # last, filter pairs
             if not joinOptimizerFlag:
+                join_expr = virtual_plan.join_expr_eval
+                match = re.search("(<=|>=|==|!=|<|>)", join_expr)
+                logic = match.group()
+                left, right = join_expr.split(logic)
+                join_rela1 = left[:left.index('.')]
+                join_attr1 = left[left.index('.')+1:]
+                #join_rela2 = right[:right.index('.')]
+                join_attr2 = right[right.index('.')+1:]
                 for uu1 in tqdm(join_uu_list1):
                     for uu2 in tqdm(join_uu_list2, leave=False):
-                        join_expr = virtual_plan.join_expr_eval
-                        match = re.search("(<=|>=|==|!=|<|>)", join_expr)
-                        logic = match.group()
-                        left, right = join_expr.split(logic)
                         #print(left, symbol, right) id2salary.id == ptr.id
-                        join_rela1 = left[:left.index('.')]
-                        join_attr1 = left[left.index('.')+1:]
-                        #join_rela2 = right[:right.index('.')]
-                        join_attr2 = right[right.index('.')+1:]
-
-                        logging.debug("logic: "+logic+" left: "+left+" right: "+right)
+                        #logging.debug("logic: "+logic+" left: "+left+" right: "+right)
                         
                         # bugging cause order:
                         # SELECT customer_name.id, customer_name.customer_name, orders.id, orders.customer_id FROM orders INNER JOIN customer_name ON orders.customer_id = customer_name.id;
@@ -958,7 +972,7 @@ def mem_exec(sql):
 
                         #print("debugg,", rela1, rela2, join_rela1)
                         # debugg, customer_name orders orders
-                        
+                        tmp = time.time()
                         if join_rela1 == rela1:
                             ans1 = baseDBDict[rela1][uu1][join_attr1]
                             ans2 = baseDBDict[rela2][uu2][join_attr2]
@@ -967,17 +981,83 @@ def mem_exec(sql):
                             # rela1: select中先出现的那个
                             ans1 = baseDBDict[rela2][uu2][join_attr1]
                             ans2 = baseDBDict[rela1][uu1][join_attr2]
-                        tmpSEval = str(ans1)+logic+str(ans2)
-                        #logging.debug()
-                        if eval(tmpSEval):
-                            for relaTMP in mpAttr.keys():
-                                for attr in mpAttr[relaTMP]:
-                                    if relaTMP == rela1:
-                                        mpAttr[relaTMP][attr].append(baseDBDict[relaTMP][uu1][attr])
-                                    else:
-                                        mpAttr[relaTMP][attr].append(baseDBDict[relaTMP][uu2][attr])
-                            row_cnt += 1
-        
+                        #print("1: ", time.time() - tmp)
+                        tmp = time.time()
+                        #tmpSEval = str(ans1)+logic+str(ans2)
+                        # TODO logic
+
+                        #print("2: ",time.time() - tmp)
+                        #logging.debug("ans1"+str(ans1)+"ans2"+str(ans2)+"tmpSEval"+tmpSEval)
+
+                        tmp = time.time()
+                        #if eval(tmpSEval):
+                        if logic == '==' and ans1 == ans2:
+                                #print("3: ",time.time() - tmp)
+                                tmp = time.time()
+                                for relaTMP in mpAttr.keys():
+                                    for attr in mpAttr[relaTMP]:
+                                        if relaTMP == rela1:
+                                            mpAttr[relaTMP][attr].append(baseDBDict[relaTMP][uu1][attr])
+                                        else:
+                                            mpAttr[relaTMP][attr].append(baseDBDict[relaTMP][uu2][attr])
+                                row_cnt += 1
+                        #print("4: ",time.time() - tmp)
+
+                        if logic == '>=' and ans1 >= ans2:
+                                #print("3: ",time.time() - tmp)
+                                tmp = time.time()
+                                for relaTMP in mpAttr.keys():
+                                    for attr in mpAttr[relaTMP]:
+                                        if relaTMP == rela1:
+                                            mpAttr[relaTMP][attr].append(baseDBDict[relaTMP][uu1][attr])
+                                        else:
+                                            mpAttr[relaTMP][attr].append(baseDBDict[relaTMP][uu2][attr])
+                                row_cnt += 1
+
+                        elif logic == '>' and ans1 > ans2:
+                                #print("3: ",time.time() - tmp)
+                                tmp = time.time()
+                                for relaTMP in mpAttr.keys():
+                                    for attr in mpAttr[relaTMP]:
+                                        if relaTMP == rela1:
+                                            mpAttr[relaTMP][attr].append(baseDBDict[relaTMP][uu1][attr])
+                                        else:
+                                            mpAttr[relaTMP][attr].append(baseDBDict[relaTMP][uu2][attr])
+                                row_cnt += 1
+
+                        elif logic == '<=' and ans1 <= ans2:
+                                #print("3: ",time.time() - tmp)
+                                tmp = time.time()
+                                for relaTMP in mpAttr.keys():
+                                    for attr in mpAttr[relaTMP]:
+                                        if relaTMP == rela1:
+                                            mpAttr[relaTMP][attr].append(baseDBDict[relaTMP][uu1][attr])
+                                        else:
+                                            mpAttr[relaTMP][attr].append(baseDBDict[relaTMP][uu2][attr])
+                                row_cnt += 1
+
+                        elif logic == '<' and ans1 < ans2:
+                                #print("3: ",time.time() - tmp)
+                                tmp = time.time()
+                                for relaTMP in mpAttr.keys():
+                                    for attr in mpAttr[relaTMP]:
+                                        if relaTMP == rela1:
+                                            mpAttr[relaTMP][attr].append(baseDBDict[relaTMP][uu1][attr])
+                                        else:
+                                            mpAttr[relaTMP][attr].append(baseDBDict[relaTMP][uu2][attr])
+                                row_cnt += 1
+                        
+                        elif logic == '!=' and ans1 != ans2:
+                                #print("3: ",time.time() - tmp)
+                                tmp = time.time()
+                                for relaTMP in mpAttr.keys():
+                                    for attr in mpAttr[relaTMP]:
+                                        if relaTMP == rela1:
+                                            mpAttr[relaTMP][attr].append(baseDBDict[relaTMP][uu1][attr])
+                                        else:
+                                            mpAttr[relaTMP][attr].append(baseDBDict[relaTMP][uu2][attr])
+                                row_cnt += 1
+
         logging.debug("After filling, mpAttr is like: " + str(mpAttr))
 
         #print(row_cnt)

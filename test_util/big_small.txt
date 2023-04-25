@@ -7,4 +7,4 @@ rela_i_i_100000
 ON
 rela_i_i_1000.key = rela_i_i_100000.key
 WHERE
-rela_i_i_1000.key<332 OR rela_i_i_100000.key>=7;
+rela_i_i_100000.key>1 AND rela_i_i_100000.key=1;
