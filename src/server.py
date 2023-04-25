@@ -9,8 +9,10 @@ import time
 import pickle
 import shutil
 import logging
+import threading
 import traceback
 from prettytable import PrettyTable
+from tqdm import tqdm
 from BTrees.OOBTree import OOBTree
 
 # my parsers
@@ -34,8 +36,11 @@ snapShotInterVal = 1
 tmpSQLLog = []
 lazyDropRelationList = []
 
-conditionOptimizerFlag = True  # only support int index
+conditionOptimizerFlag = False  # only support int index
 joinOptimizerFlag = False
+
+sys.setrecursionlimit(10000000)
+threading.stack_size(67108864)
 
 ############################### dev tools, for debug and log ###############################
 # create a formatter that prints ERROR messages in red
@@ -46,11 +51,11 @@ class ColoredFormatter(logging.Formatter):
         return super(ColoredFormatter, self).format(record)
 
 # configure the root logger to handle all log levels
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.ERROR)
 
 # create a console handler and set its formatter to the colored formatter
 console_handler = logging.StreamHandler()
-console_handler.setLevel(logging.ERROR)
+console_handler.setLevel(logging.DEBUG)
 console_handler.setFormatter(ColoredFormatter('%(levelname)s: %(message)s'))
 
 # add the console handler to the root logger
@@ -135,7 +140,7 @@ def load_snapshot():
         relation = f[:-5]
         attr_dict = loadRelationMeta("meta/" + f)
         metaDict.setdefault(relation, attr_dict)
-    logging.debug("Successfully load metaDict " + str(metaDict))
+    #logging.debug("Successfully load metaDict " + str(metaDict))
 
     # load baseDB
     baseDB_path = 'baseDB/'
@@ -151,7 +156,7 @@ def load_snapshot():
                 lst = row[1:]
                 inner_mp = base_lst2mp(relation, lst)
                 baseDBDict[relation].setdefault(uuid, inner_mp)
-    logging.debug("Successfully load baseDBDict " + str(baseDBDict))
+    #logging.debug("Successfully load baseDBDict " + str(baseDBDict))
 
     # load btree
     btree_path = 'btree/'
@@ -168,7 +173,7 @@ def load_snapshot():
                 btree = pickle.load(f)
                 BTreeDict[relation].setdefault(attr, btree)
                 #print(BTreeDict[relation][attr])
-    logging.debug("Successfully load BTreeDict " + str(BTreeDict))
+    #logging.debug("Successfully load BTreeDict " + str(BTreeDict))
     #print(BTreeDict["ptr"]["id"]["909"])
 
     # load treap
@@ -185,7 +190,7 @@ def load_snapshot():
             with open(file_path, 'rb') as f:
                 treap = pickle.load(f)
                 TreapDict[relation].setdefault(attr, treap)
-    logging.debug("Successfully load TreapDict " + str(TreapDict))
+    #logging.debug("Successfully load TreapDict " + str(TreapDict))
 
     #load constraint
     constraint_path = 'constraint/'
@@ -196,7 +201,7 @@ def load_snapshot():
         with open(getConstraintFileName(relation), 'rb') as file:
             mp = pickle.load(file)
             constraintDict.setdefault(relation, mp)
-    logging.debug("Successfully load constraintDict " + str(constraintDict))
+    #logging.debug("Successfully load constraintDict " + str(constraintDict))
     
 def getMetaFileName(relationName):
     return "meta/"+relationName+".meta"
@@ -647,7 +652,7 @@ def calc_rows_by_treap(rela, attr, op, val):
     # TreapDict[rela][attr]
     if rela not in TreapDict.keys() or attr not in TreapDict[rela].keys() or TreapDict[rela][attr]==None:
         return -1
-    if op == '=':
+    if op == '==':
         return treap.find(TreapDict[rela][attr], val)
     if op == '<':
         return treap.rank(TreapDict[rela][attr], val)
@@ -660,7 +665,11 @@ def calc_rows_by_treap(rela, attr, op, val):
     if op == '!=':
         return TreapDict[rela][attr].sub_tree_size - treap.find(TreapDict[rela][attr], val)
 
+parsing_consume = 0
+storage_consume = 0
 def mem_exec(sql):
+    global parsing_consume
+    global storage_consume    
     op = 999
     # create table 
     # CREATE TABLE TTT(ID INT PRIMARY KEY);
@@ -692,7 +701,10 @@ def mem_exec(sql):
         drop_table(virtual_plan.table_name)
 
     elif sql.upper().find("INSERT INTO") != -1:
+        tmp = time.time()
         virtual_plan = parser_Insert.virtual_plan_create(sql)
+        parsing_consume += time.time()-tmp
+
         logging.debug(virtual_plan.__dict__)    # {'table_name': 'students', 'columnsKey': ['id', 'name', 'gender', 'age', 'score'], 'columnsValue': [1, 'Alice', 'F', 18, 95], 'asName': 'qq'}
         op_list = []
         if len(virtual_plan.columnsKey) != len(virtual_plan.columnsValue):
@@ -700,7 +712,9 @@ def mem_exec(sql):
         for i in range(len(virtual_plan.columnsKey)):
             #op_list.append(virtual_plan.columnsKey[i])
             op_list.append(virtual_plan.columnsValue[i])
+        tmp2 = time.time()
         write_row(virtual_plan.table_name, op_list)
+        storage_consume += time.time()-tmp2
     
     elif sql.upper().find("DELETE FROM") != -1:
         virtual_plan = parser_Delete.virtual_plan_create(sql)
@@ -792,20 +806,23 @@ def mem_exec(sql):
                     val2 = int(virtual_plan.where_expr2_eval[brkAttrNameIndex2+1:])
 
                 #print(op1, op2, val1, val2)
-                row_cnt_satisfy_expr1 = calc_rows_by_treap(where_expr1_rela, where_expr1_attr, op1, val1)
-                row_cnt_satisfy_expr2 = calc_rows_by_treap(where_expr2_rela, where_expr2_attr, op2, val2)
+                row_cnt_satisfy_expr1 = int(calc_rows_by_treap(where_expr1_rela, where_expr1_attr, op1, val1))
+                row_cnt_satisfy_expr2 = int(calc_rows_by_treap(where_expr2_rela, where_expr2_attr, op2, val2))
                 logging.debug("sats 1: "+str(row_cnt_satisfy_expr1))
                 logging.debug("sats 2: "+str(row_cnt_satisfy_expr2))
-                if row_cnt_satisfy_expr1 < row_cnt_satisfy_expr2:
+                if row_cnt_satisfy_expr1 == -1 or row_cnt_satisfy_expr2 == -1:
+                    pass
+                elif row_cnt_satisfy_expr1 < row_cnt_satisfy_expr2:
                     if virtual_plan.where_logic == 'or':
                         swap_expr_flag = True
-                if row_cnt_satisfy_expr1 > row_cnt_satisfy_expr2:
+                elif row_cnt_satisfy_expr1 > row_cnt_satisfy_expr2:
                     if virtual_plan.where_logic == 'and':
                         swap_expr_flag = True
 
         if swap_expr_flag:
             virtual_plan.where_expr1_eval, virtual_plan.where_expr2_eval = virtual_plan.where_expr2_eval, virtual_plan.where_expr1_eval
-            # brkRelaNameIndex: won't use
+            brkRelaNameIndex1, brkRelaNameIndex2 = brkRelaNameIndex2, brkRelaNameIndex1
+            brkAttrNameIndex1, brkAttrNameIndex2 = brkAttrNameIndex2, brkAttrNameIndex1 
             where_expr1_rela, where_expr2_rela = where_expr2_rela, where_expr1_rela
             where_expr1_attr, where_expr2_attr = where_expr2_attr, where_expr1_attr
             # op: won't use
@@ -830,24 +847,37 @@ def mem_exec(sql):
                             mpAttr[rela][attr].append(baseDBDict[rela][row_uu][attr])
                         row_cnt += 1
                 else:   # double expr && no join
-                    #ans1_where_no_join = baseDBDict[where_expr1_rela][row_uu][where_expr1_attr]
-                    #ans2_where_no_join = baseDBDict[where_expr2_rela][row_uu][where_expr2_attr]
-
                     ans1_where_no_join = baseDBDict[where_expr1_rela][row_uu][where_expr1_attr]
                     if metaDict[where_expr1_rela][where_expr1_attr] == 'str':
                         ans1_where_no_join = '\''+ans1_where_no_join+'\''
-                    ans2_where_no_join = baseDBDict[where_expr2_rela][row_uu][where_expr2_attr]
-                    if metaDict[where_expr2_rela][where_expr2_attr] == 'str':
-                        ans2_where_no_join = '\''+ans2_where_no_join+'\''
-
                     tmpEvalS1 = virtual_plan.where_expr1_eval.replace(virtual_plan.where_expr1_eval[:brkAttrNameIndex1], str(ans1_where_no_join))
-                    tmpEvalS2 = virtual_plan.where_expr2_eval.replace(virtual_plan.where_expr2_eval[:brkAttrNameIndex2], str(ans2_where_no_join))
-                    logging.debug("ok double where without join: "+str(tmpEvalS1)+" "+str(tmpEvalS2))
+                    if eval(tmpEvalS1):
+                        if virtual_plan.where_logic == 'or':
+                            for attr in mpAttr[rela]:
+                                mpAttr[rela][attr].append(baseDBDict[rela][row_uu][attr])
+                        else:   # and
+                            ans2_where_no_join = baseDBDict[where_expr2_rela][row_uu][where_expr2_attr]
+                            if metaDict[where_expr2_rela][where_expr2_attr] == 'str':
+                                ans2_where_no_join = '\''+ans2_where_no_join+'\''
+                            tmpEvalS2 = virtual_plan.where_expr2_eval.replace(virtual_plan.where_expr2_eval[:brkAttrNameIndex2], str(ans2_where_no_join))
+                            if eval(tmpEvalS2):
+                                for attr in mpAttr[rela]:
+                                    mpAttr[rela][attr].append(baseDBDict[rela][row_uu][attr])
+                    else:   # tmpEvalS1 is False
+                        if virtual_plan.where_logic == 'or':
+                            ans2_where_no_join = baseDBDict[where_expr2_rela][row_uu][where_expr2_attr]
+                            if metaDict[where_expr2_rela][where_expr2_attr] == 'str':
+                                ans2_where_no_join = '\''+ans2_where_no_join+'\''
+                            tmpEvalS2 = virtual_plan.where_expr2_eval.replace(virtual_plan.where_expr2_eval[:brkAttrNameIndex2], str(ans2_where_no_join))
+                            if eval(tmpEvalS2):
+                                for attr in mpAttr[rela]:
+                                    mpAttr[rela][attr].append(baseDBDict[rela][row_uu][attr])
+                    #logging.debug("ok double where without join: "+str(tmpEvalS1)+" "+str(tmpEvalS2))
                     #if eval(str(eval(tmpEvalS1))+" "+str(virtual_plan.where_logic)+" "+str(eval(tmpEvalS2))):
-                    if eval(tmpEvalS1+" "+str(virtual_plan.where_logic)+" "+tmpEvalS2):
-                        for attr in mpAttr[rela]:
-                            mpAttr[rela][attr].append(baseDBDict[rela][row_uu][attr])
-                        row_cnt += 1
+                    #if eval(tmpEvalS1+" "+str(virtual_plan.where_logic)+" "+tmpEvalS2):
+                    #    for attr in mpAttr[rela]:
+                    #        mpAttr[rela][attr].append(baseDBDict[rela][row_uu][attr])
+                    #    row_cnt += 1
         else:   #join, 叉积新表
             # 1. test row_uu and row_uu2 for where
             # 2. test join_expr
@@ -913,23 +943,22 @@ def mem_exec(sql):
                                 join_uu_list2.append(row_uu)
                                 row_cnt2 += 1
             
-            logging.debug("join_uu_list1: " + str(join_uu_list1))
-            logging.debug("join_uu_list2: " + str(join_uu_list2))
+            #logging.debug("join_uu_list1: " + str(join_uu_list1))
+            #logging.debug("join_uu_list2: " + str(join_uu_list2))
             # last, filter pairs
             if not joinOptimizerFlag:
-                for uu1 in join_uu_list1:
-                    for uu2 in join_uu_list2:
-                        join_expr = virtual_plan.join_expr_eval
-                        match = re.search("(<=|>=|==|!=|<|>)", join_expr)
-                        logic = match.group()
-                        left, right = join_expr.split(logic)
+                join_expr = virtual_plan.join_expr_eval
+                match = re.search("(<=|>=|==|!=|<|>)", join_expr)
+                logic = match.group()
+                left, right = join_expr.split(logic)
+                join_rela1 = left[:left.index('.')]
+                join_attr1 = left[left.index('.')+1:]
+                #join_rela2 = right[:right.index('.')]
+                join_attr2 = right[right.index('.')+1:]
+                for uu1 in tqdm(join_uu_list1):
+                    for uu2 in tqdm(join_uu_list2, leave=False):
                         #print(left, symbol, right) id2salary.id == ptr.id
-                        join_rela1 = left[:left.index('.')]
-                        join_attr1 = left[left.index('.')+1:]
-                        #join_rela2 = right[:right.index('.')]
-                        join_attr2 = right[right.index('.')+1:]
-
-                        logging.debug("logic: "+logic+" left: "+left+" right: "+right)
+                        #logging.debug("logic: "+logic+" left: "+left+" right: "+right)
                         
                         # bugging cause order:
                         # SELECT customer_name.id, customer_name.customer_name, orders.id, orders.customer_id FROM orders INNER JOIN customer_name ON orders.customer_id = customer_name.id;
@@ -943,7 +972,7 @@ def mem_exec(sql):
 
                         #print("debugg,", rela1, rela2, join_rela1)
                         # debugg, customer_name orders orders
-                        
+                        tmp = time.time()
                         if join_rela1 == rela1:
                             ans1 = baseDBDict[rela1][uu1][join_attr1]
                             ans2 = baseDBDict[rela2][uu2][join_attr2]
@@ -952,17 +981,83 @@ def mem_exec(sql):
                             # rela1: select中先出现的那个
                             ans1 = baseDBDict[rela2][uu2][join_attr1]
                             ans2 = baseDBDict[rela1][uu1][join_attr2]
-                        tmpSEval = str(ans1)+logic+str(ans2)
-                        #logging.debug()
-                        if eval(tmpSEval):
-                            for relaTMP in mpAttr.keys():
-                                for attr in mpAttr[relaTMP]:
-                                    if relaTMP == rela1:
-                                        mpAttr[relaTMP][attr].append(baseDBDict[relaTMP][uu1][attr])
-                                    else:
-                                        mpAttr[relaTMP][attr].append(baseDBDict[relaTMP][uu2][attr])
-                            row_cnt += 1
-        
+                        #print("1: ", time.time() - tmp)
+                        tmp = time.time()
+                        #tmpSEval = str(ans1)+logic+str(ans2)
+                        # TODO logic
+
+                        #print("2: ",time.time() - tmp)
+                        #logging.debug("ans1"+str(ans1)+"ans2"+str(ans2)+"tmpSEval"+tmpSEval)
+
+                        tmp = time.time()
+                        #if eval(tmpSEval):
+                        if logic == '==' and ans1 == ans2:
+                                #print("3: ",time.time() - tmp)
+                                tmp = time.time()
+                                for relaTMP in mpAttr.keys():
+                                    for attr in mpAttr[relaTMP]:
+                                        if relaTMP == rela1:
+                                            mpAttr[relaTMP][attr].append(baseDBDict[relaTMP][uu1][attr])
+                                        else:
+                                            mpAttr[relaTMP][attr].append(baseDBDict[relaTMP][uu2][attr])
+                                row_cnt += 1
+                        #print("4: ",time.time() - tmp)
+
+                        if logic == '>=' and ans1 >= ans2:
+                                #print("3: ",time.time() - tmp)
+                                tmp = time.time()
+                                for relaTMP in mpAttr.keys():
+                                    for attr in mpAttr[relaTMP]:
+                                        if relaTMP == rela1:
+                                            mpAttr[relaTMP][attr].append(baseDBDict[relaTMP][uu1][attr])
+                                        else:
+                                            mpAttr[relaTMP][attr].append(baseDBDict[relaTMP][uu2][attr])
+                                row_cnt += 1
+
+                        elif logic == '>' and ans1 > ans2:
+                                #print("3: ",time.time() - tmp)
+                                tmp = time.time()
+                                for relaTMP in mpAttr.keys():
+                                    for attr in mpAttr[relaTMP]:
+                                        if relaTMP == rela1:
+                                            mpAttr[relaTMP][attr].append(baseDBDict[relaTMP][uu1][attr])
+                                        else:
+                                            mpAttr[relaTMP][attr].append(baseDBDict[relaTMP][uu2][attr])
+                                row_cnt += 1
+
+                        elif logic == '<=' and ans1 <= ans2:
+                                #print("3: ",time.time() - tmp)
+                                tmp = time.time()
+                                for relaTMP in mpAttr.keys():
+                                    for attr in mpAttr[relaTMP]:
+                                        if relaTMP == rela1:
+                                            mpAttr[relaTMP][attr].append(baseDBDict[relaTMP][uu1][attr])
+                                        else:
+                                            mpAttr[relaTMP][attr].append(baseDBDict[relaTMP][uu2][attr])
+                                row_cnt += 1
+
+                        elif logic == '<' and ans1 < ans2:
+                                #print("3: ",time.time() - tmp)
+                                tmp = time.time()
+                                for relaTMP in mpAttr.keys():
+                                    for attr in mpAttr[relaTMP]:
+                                        if relaTMP == rela1:
+                                            mpAttr[relaTMP][attr].append(baseDBDict[relaTMP][uu1][attr])
+                                        else:
+                                            mpAttr[relaTMP][attr].append(baseDBDict[relaTMP][uu2][attr])
+                                row_cnt += 1
+                        
+                        elif logic == '!=' and ans1 != ans2:
+                                #print("3: ",time.time() - tmp)
+                                tmp = time.time()
+                                for relaTMP in mpAttr.keys():
+                                    for attr in mpAttr[relaTMP]:
+                                        if relaTMP == rela1:
+                                            mpAttr[relaTMP][attr].append(baseDBDict[relaTMP][uu1][attr])
+                                        else:
+                                            mpAttr[relaTMP][attr].append(baseDBDict[relaTMP][uu2][attr])
+                                row_cnt += 1
+
         logging.debug("After filling, mpAttr is like: " + str(mpAttr))
 
         #print(row_cnt)
@@ -1192,7 +1287,6 @@ def engine():
         if sql == "quit;":
             print("Bye!")
             exit(0)
-
         st_time = time.time()
         try:
             mem_exec(sql)
@@ -1219,7 +1313,32 @@ def engine():
             tmpSQLLog.clear()
             print("Periodcally persists done, all previous sql committed!")
 
-def main():
-    engine()
+def main(canned_query_file):
+    if canned_query_file == None:
+        engine()
+    else:
+        try:
+            st_time = time.time()
+            load_snapshot()
+            tot = 0
+            with open(canned_query_file, 'r') as f:
+                for line in tqdm(f, desc="Processing lines"):
+                    tmp = time.time()
+                    mem_exec(line)
+                    tot += time.time()-tmp
+        except Exception as e:
+            err_logger.error(f"sql runtime error: {type(e)}: {e}")
+            exit(1)
+    lazy_file_del()
+    persist_snapshot()
+    print("Time consumed:",time.time()-st_time,"seconds.")
+    print("Successfuly completed, bye!")
+    print("exact running consume", tot)
+    print("parsing:",parsing_consume)
+    print("storage:",storage_consume)
 
-main()
+if __name__ == '__main__':
+    if len(sys.argv) == 2:
+        main(sys.argv[1])
+    else:
+        main(None)

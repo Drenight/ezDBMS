@@ -327,11 +327,15 @@ def main():
         ON 
         customer_name.id = orders.customer_id 
         WHERE
-        orders.id>0 AND orders.id>=1000
+        orders.id>0 OR orders.id>=1000
         GROUP BY 
         customer_name.id 
         HAVING 
         MIN(orders.customer_id)>=0 OR MIN(orders.customer_id)=1;
+    """
+
+    sql14 = """
+        SELECT rela_i_i_10000.key, rela_i_i_10000.val FROM rela_i_i_10000 WHERE rela_i_i_10000.key>=7 AND rela_i_i_10000.val<=99993;
     """
 
     input_stream = InputStream(sql11)
