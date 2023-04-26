@@ -50,7 +50,8 @@ class SelectPlan:
         self.Group = False
         self.group_attr = None
 
-        self.orderBy = None
+        self.orderByAttr = None
+        self.orderByAsc = True
         self.limit = None
         
         self.txtAttrs = []
@@ -254,6 +255,13 @@ class SelectListener(SQLiteParserListener):
         return super().enterResult_column(ctx)
 
     def enterSelect_stmt(self, ctx: SQLiteParser.Select_stmtContext):
+        order_by_Ctx = ctx.order_by_stmt()
+        if order_by_Ctx != None:
+            attr = order_by_Ctx.ordering_term().getText()
+            self.plan.orderByAttr = attr
+
+        limitCtx = ctx.limit_stmt()
+
         return super().enterSelect_stmt(ctx)
 
     def enterOrder_by_stmt(self, ctx: SQLiteParser.Order_by_stmtContext):
