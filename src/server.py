@@ -3,6 +3,7 @@ import os
 import csv
 import sys
 import glob
+import math
 import dill
 import uuid
 import time
@@ -36,8 +37,8 @@ snapShotInterVal = 1
 tmpSQLLog = []
 lazyDropRelationList = []
 
-conditionOptimizerFlag = False  # only support int index
-joinOptimizerFlag = False
+conditionOptimizerFlag = True  # only support int index
+joinOptimizerFlag = True
 
 sys.setrecursionlimit(10000000)
 threading.stack_size(67108864)
@@ -665,6 +666,80 @@ def calc_rows_by_treap(rela, attr, op, val):
     if op == '!=':
         return TreapDict[rela][attr].sub_tree_size - treap.find(TreapDict[rela][attr], val)
 
+def join_judger(rela1, ans1, ans2, logic, mpAttr, uu1, uu2):
+    row_cnt = 0
+    if logic == '==' and ans1 == ans2:
+            #print("3: ",time.time() - tmp)
+            for relaTMP in mpAttr.keys():
+                for attr in mpAttr[relaTMP]:
+                    if relaTMP == rela1:
+                        mpAttr[relaTMP][attr].append(baseDBDict[relaTMP][uu1][attr])
+                    else:
+                        mpAttr[relaTMP][attr].append(baseDBDict[relaTMP][uu2][attr])
+            row_cnt += 1
+
+    if logic == '>=' and ans1 >= ans2:
+            tmp = time.time()
+            for relaTMP in mpAttr.keys():
+                for attr in mpAttr[relaTMP]:
+                    if relaTMP == rela1:
+                        mpAttr[relaTMP][attr].append(baseDBDict[relaTMP][uu1][attr])
+                    else:
+                        mpAttr[relaTMP][attr].append(baseDBDict[relaTMP][uu2][attr])
+            row_cnt += 1
+
+    elif logic == '>' and ans1 > ans2:
+            #print("3: ",time.time() - tmp)
+            tmp = time.time()
+            for relaTMP in mpAttr.keys():
+                for attr in mpAttr[relaTMP]:
+                    if relaTMP == rela1:
+                        mpAttr[relaTMP][attr].append(baseDBDict[relaTMP][uu1][attr])
+                    else:
+                        mpAttr[relaTMP][attr].append(baseDBDict[relaTMP][uu2][attr])
+            row_cnt += 1
+
+    elif logic == '<=' and ans1 <= ans2:
+            #print("3: ",time.time() - tmp)
+            tmp = time.time()
+            for relaTMP in mpAttr.keys():
+                for attr in mpAttr[relaTMP]:
+                    if relaTMP == rela1:
+                        mpAttr[relaTMP][attr].append(baseDBDict[relaTMP][uu1][attr])
+                    else:
+                        mpAttr[relaTMP][attr].append(baseDBDict[relaTMP][uu2][attr])
+            row_cnt += 1
+
+    elif logic == '<' and ans1 < ans2:
+            #print("3: ",time.time() - tmp)
+            tmp = time.time()
+            for relaTMP in mpAttr.keys():
+                for attr in mpAttr[relaTMP]:
+                    if relaTMP == rela1:
+                        mpAttr[relaTMP][attr].append(baseDBDict[relaTMP][uu1][attr])
+                    else:
+                        mpAttr[relaTMP][attr].append(baseDBDict[relaTMP][uu2][attr])
+            row_cnt += 1
+    
+    elif logic == '!=' and ans1 != ans2:
+            #print("3: ",time.time() - tmp)
+            tmp = time.time()
+            for relaTMP in mpAttr.keys():
+                for attr in mpAttr[relaTMP]:
+                    if relaTMP == rela1:
+                        mpAttr[relaTMP][attr].append(baseDBDict[relaTMP][uu1][attr])
+                    else:
+                        mpAttr[relaTMP][attr].append(baseDBDict[relaTMP][uu2][attr])
+            row_cnt += 1
+    return row_cnt
+
+def check_sort_faster(n, m):
+    base = 2
+    return n * math.log(n, base) + m * math.log(m, base) + n + m - 1 < n * m
+
+def join_sort(uu, rela, join_attr):
+    return baseDBDict[rela][uu][join_attr]
+
 parsing_consume = 0
 storage_consume = 0
 def mem_exec(sql):
@@ -946,117 +1021,79 @@ def mem_exec(sql):
             #logging.debug("join_uu_list1: " + str(join_uu_list1))
             #logging.debug("join_uu_list2: " + str(join_uu_list2))
             # last, filter pairs
-            if not joinOptimizerFlag:
-                join_expr = virtual_plan.join_expr_eval
-                match = re.search("(<=|>=|==|!=|<|>)", join_expr)
-                logic = match.group()
-                left, right = join_expr.split(logic)
-                join_rela1 = left[:left.index('.')]
-                join_attr1 = left[left.index('.')+1:]
-                #join_rela2 = right[:right.index('.')]
-                join_attr2 = right[right.index('.')+1:]
-                for uu1 in tqdm(join_uu_list1):
-                    for uu2 in tqdm(join_uu_list2, leave=False):
-                        #print(left, symbol, right) id2salary.id == ptr.id
-                        #logging.debug("logic: "+logic+" left: "+left+" right: "+right)
-                        
-                        # bugging cause order:
-                        # SELECT customer_name.id, customer_name.customer_name, orders.id, orders.customer_id FROM orders INNER JOIN customer_name ON orders.customer_id = customer_name.id;
-                        # 
-                        # SELECT 
-                        #   customer_name.id, customer_name.customer_name, orders.id, orders.customer_id 
-                        # FROM 
-                        #   orders INNER JOIN customer_name 
-                        # ON 
-                        #   orders.customer_id = customer_name.id;
+            join_expr = virtual_plan.join_expr_eval
+            match = re.search("(<=|>=|==|!=|<|>)", join_expr)
+            logic = match.group()
+            left, right = join_expr.split(logic)
+            join_rela1 = left[:left.index('.')]
+            join_attr1 = left[left.index('.')+1:]
+            #join_rela2 = right[:right.index('.')]
+            join_attr2 = right[right.index('.')+1:]
 
-                        #print("debugg,", rela1, rela2, join_rela1)
-                        # debugg, customer_name orders orders
-                        tmp = time.time()
-                        if join_rela1 == rela1:
+            join_swap_flag = True
+            if join_rela1 == rela1:
+                join_swap_flag = False
+            
+            if logic == '==' and joinOptimizerFlag and check_sort_faster(len(join_uu_list1), len(join_uu_list2)): # sort it
+                if not join_swap_flag:
+                    sorted_uu_list1 = sorted(join_uu_list1, key = lambda x:join_sort(x, rela1, join_attr1))
+                    sorted_uu_list2 = sorted(join_uu_list2, key = lambda x:join_sort(x, rela2, join_attr2))
+                else:
+                    sorted_uu_list1 = sorted(join_uu_list1, key = lambda x:join_sort(x, rela1, join_attr2))
+                    sorted_uu_list2 = sorted(join_uu_list2, key = lambda x:join_sort(x, rela2, join_attr1))
+                
+                if min(len(sorted_uu_list1), len(sorted_uu_list2)) == 0:
+                    pass
+                else:
+                    ptr1 = 0
+                    len1 = len(sorted_uu_list1)
+                    ptr2 = 0
+                    len2 = len(sorted_uu_list2)
+ 
+                    with tqdm(total=min(len1, len2)) as pbar:
+                        while ptr1<len1 and ptr2<len2:
+                            ans1 = baseDBDict[rela1][sorted_uu_list1[ptr1]][join_attr1]
+                            ans2 = baseDBDict[rela2][sorted_uu_list2[ptr2]][join_attr2]
+
+                            if ans1 < ans2:
+                                ptr1 += 1
+                                continue
+                            if ans1 > ans2:
+                                ptr2 += 1
+                                continue
+                            if ans1 == ans2:
+                                step1 = 0
+                                for tmp in range(0, len1-ptr1):
+                                    if baseDBDict[rela1][sorted_uu_list1[ptr1 + tmp]][join_attr1] == ans1:
+                                        step1 += 1
+                                step2 = 0
+                                for tmp in range(0, len2-ptr2):
+                                    if baseDBDict[rela2][sorted_uu_list2[ptr2 + tmp]][join_attr2] == ans2:
+                                        step2 += 1
+                                
+                                for pp1 in range(ptr1, ptr1+step1):
+                                    for pp2 in range(ptr2, ptr2+step2):
+                                        row_cnt += join_judger(rela1, ans1, ans2, logic, mpAttr, sorted_uu_list1[pp1], sorted_uu_list2[pp2])
+                                
+                                ptr1 = ptr1+step1+1
+                                ptr2 = ptr2+step2+1
+                            pbar.update(1)
+            # join_judger's rela1 is for telling uu1 is connected to who, rela2 is got in mpAttr, just rela1
+
+            else:
+                if not join_swap_flag:
+                    for uu1 in tqdm(join_uu_list1):
+                        for uu2 in tqdm(join_uu_list2, leave=False):
+                            # TODO 挪出来变成逻辑分支可以更快
                             ans1 = baseDBDict[rela1][uu1][join_attr1]
-                            ans2 = baseDBDict[rela2][uu2][join_attr2]
-                        else:
-                            # 因为join和select是反的，那么join_attr1就要给rela2了，   
-                            # rela1: select中先出现的那个
+                            ans2 = baseDBDict[rela2][uu2][join_attr2]                                
+                            row_cnt += join_judger(rela1, ans1, ans2, logic, mpAttr, uu1, uu2)
+                else:
+                    for uu1 in tqdm(join_uu_list1):
+                        for uu2 in tqdm(join_uu_list2, leave=False):
                             ans1 = baseDBDict[rela2][uu2][join_attr1]
                             ans2 = baseDBDict[rela1][uu1][join_attr2]
-                        #print("1: ", time.time() - tmp)
-                        tmp = time.time()
-                        #tmpSEval = str(ans1)+logic+str(ans2)
-                        # TODO logic
-
-                        #print("2: ",time.time() - tmp)
-                        #logging.debug("ans1"+str(ans1)+"ans2"+str(ans2)+"tmpSEval"+tmpSEval)
-
-                        tmp = time.time()
-                        #if eval(tmpSEval):
-                        if logic == '==' and ans1 == ans2:
-                                #print("3: ",time.time() - tmp)
-                                tmp = time.time()
-                                for relaTMP in mpAttr.keys():
-                                    for attr in mpAttr[relaTMP]:
-                                        if relaTMP == rela1:
-                                            mpAttr[relaTMP][attr].append(baseDBDict[relaTMP][uu1][attr])
-                                        else:
-                                            mpAttr[relaTMP][attr].append(baseDBDict[relaTMP][uu2][attr])
-                                row_cnt += 1
-                        #print("4: ",time.time() - tmp)
-
-                        if logic == '>=' and ans1 >= ans2:
-                                #print("3: ",time.time() - tmp)
-                                tmp = time.time()
-                                for relaTMP in mpAttr.keys():
-                                    for attr in mpAttr[relaTMP]:
-                                        if relaTMP == rela1:
-                                            mpAttr[relaTMP][attr].append(baseDBDict[relaTMP][uu1][attr])
-                                        else:
-                                            mpAttr[relaTMP][attr].append(baseDBDict[relaTMP][uu2][attr])
-                                row_cnt += 1
-
-                        elif logic == '>' and ans1 > ans2:
-                                #print("3: ",time.time() - tmp)
-                                tmp = time.time()
-                                for relaTMP in mpAttr.keys():
-                                    for attr in mpAttr[relaTMP]:
-                                        if relaTMP == rela1:
-                                            mpAttr[relaTMP][attr].append(baseDBDict[relaTMP][uu1][attr])
-                                        else:
-                                            mpAttr[relaTMP][attr].append(baseDBDict[relaTMP][uu2][attr])
-                                row_cnt += 1
-
-                        elif logic == '<=' and ans1 <= ans2:
-                                #print("3: ",time.time() - tmp)
-                                tmp = time.time()
-                                for relaTMP in mpAttr.keys():
-                                    for attr in mpAttr[relaTMP]:
-                                        if relaTMP == rela1:
-                                            mpAttr[relaTMP][attr].append(baseDBDict[relaTMP][uu1][attr])
-                                        else:
-                                            mpAttr[relaTMP][attr].append(baseDBDict[relaTMP][uu2][attr])
-                                row_cnt += 1
-
-                        elif logic == '<' and ans1 < ans2:
-                                #print("3: ",time.time() - tmp)
-                                tmp = time.time()
-                                for relaTMP in mpAttr.keys():
-                                    for attr in mpAttr[relaTMP]:
-                                        if relaTMP == rela1:
-                                            mpAttr[relaTMP][attr].append(baseDBDict[relaTMP][uu1][attr])
-                                        else:
-                                            mpAttr[relaTMP][attr].append(baseDBDict[relaTMP][uu2][attr])
-                                row_cnt += 1
-                        
-                        elif logic == '!=' and ans1 != ans2:
-                                #print("3: ",time.time() - tmp)
-                                tmp = time.time()
-                                for relaTMP in mpAttr.keys():
-                                    for attr in mpAttr[relaTMP]:
-                                        if relaTMP == rela1:
-                                            mpAttr[relaTMP][attr].append(baseDBDict[relaTMP][uu1][attr])
-                                        else:
-                                            mpAttr[relaTMP][attr].append(baseDBDict[relaTMP][uu2][attr])
-                                row_cnt += 1
+                            row_cnt += join_judger(rela1, ans1, ans2, logic, mpAttr, uu1, uu2)
 
         logging.debug("After filling, mpAttr is like: " + str(mpAttr))
 
