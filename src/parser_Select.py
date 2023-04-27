@@ -257,10 +257,13 @@ class SelectListener(SQLiteParserListener):
     def enterSelect_stmt(self, ctx: SQLiteParser.Select_stmtContext):
         order_by_Ctx = ctx.order_by_stmt()
         if order_by_Ctx != None:
-            attr = order_by_Ctx.ordering_term().getText()
-            self.plan.orderByAttr = attr
+            self.plan.orderByAttr = order_by_Ctx.ordering_term()[0].expr().getText()
+            if order_by_Ctx.ordering_term()[0].asc_desc().getText() == 'DESC':
+                self.plan.orderByAsc = False
 
         limitCtx = ctx.limit_stmt()
+        if limitCtx!= None:
+            self.plan.limit = eval(limitCtx.expr()[0].getText())
 
         return super().enterSelect_stmt(ctx)
 
@@ -339,14 +342,22 @@ def main():
         GROUP BY 
         customer_name.id 
         HAVING 
-        MIN(orders.customer_id)>=0 OR MIN(orders.customer_id)=1;
+        MIN(orders.customer_id)>=0 OR MIN(orders.customer_id)=1
+        ORDER BY 
+        customer_name.id ASC
+        LIMIT 
+        15;
     """
 
     sql14 = """
         SELECT rela_i_i_10000.key, rela_i_i_10000.val FROM rela_i_i_10000 WHERE rela_i_i_10000.key>=7 AND rela_i_i_10000.val<=99993;
     """
 
-    input_stream = InputStream(sql11)
+    sql15 = """
+        SELECT * FROM rela_i_i_100000 ORDER BY rela_i_i_100000.key DESC LIMIT 15;
+    """
+
+    input_stream = InputStream(sql15)
     lexer = SQLiteLexer(input_stream)
     token_stream = CommonTokenStream(lexer)
     parser = SQLiteParser(token_stream)
