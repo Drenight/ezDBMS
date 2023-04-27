@@ -1066,17 +1066,21 @@ def mem_exec(sql):
                                 for tmp in range(0, len1-ptr1):
                                     if baseDBDict[rela1][sorted_uu_list1[ptr1 + tmp]][join_attr1] == ans1:
                                         step1 += 1
+                                    else:
+                                        break
                                 step2 = 0
                                 for tmp in range(0, len2-ptr2):
                                     if baseDBDict[rela2][sorted_uu_list2[ptr2 + tmp]][join_attr2] == ans2:
                                         step2 += 1
+                                    else:
+                                        break
                                 
                                 for pp1 in range(ptr1, ptr1+step1):
                                     for pp2 in range(ptr2, ptr2+step2):
                                         row_cnt += join_judger(rela1, ans1, ans2, logic, mpAttr, sorted_uu_list1[pp1], sorted_uu_list2[pp2])
                                 
-                                ptr1 = ptr1+step1+1
-                                ptr2 = ptr2+step2+1
+                                ptr1 = ptr1+step1
+                                ptr2 = ptr2+step2
                             pbar.update(1)
             # join_judger's rela1 is for telling uu1 is connected to who, rela2 is got in mpAttr, just rela1
 
@@ -1174,7 +1178,17 @@ def mem_exec(sql):
             table4Print = PrettyTable(colNameForPrint)
             for row in ret_list:
                 table4Print.add_row(row)
-            print(table4Print)
+            if virtual_plan.orderByAttr != None:
+                table4Print.sortby = virtual_plan.orderByAttr
+                table4Print.reversesort = not virtual_plan.orderByAsc
+            if virtual_plan.limit != None:
+                #if len(table4Print.rows) > virtual_plan.limit:
+                if table4Print.reversesort:
+                    print(table4Print[-virtual_plan.limit:])
+                else:
+                    print(table4Print[:virtual_plan.limit])
+            else:
+                print(table4Print)
             sys.stdout.flush() # force flushing the output buffer
         # Time to do group by && having
         else:   #这种的，记得列名打全了
@@ -1254,7 +1268,17 @@ def mem_exec(sql):
                             tmpList.append(aggr_row_func(grpMP[aggr_attr_value], tu[2], tu[0]+'.'+tu[1]))
                     table.add_row(tmpList)
             
-            print(table)        
+            if virtual_plan.orderByAttr != None:
+                table.sortby = virtual_plan.orderByAttr
+                table.reversesort = not virtual_plan.orderByAsc
+            if virtual_plan.limit != None:
+                #if len(table4Print.rows) > virtual_plan.limit:
+                if table.reversesort:
+                    print(table[-virtual_plan.limit:])
+                else:
+                    print(table[:virtual_plan.limit])
+            else:
+                print(table)    
             sys.stdout.flush()
         #else:   #has aggr
         #    pass

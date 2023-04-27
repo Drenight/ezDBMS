@@ -71,7 +71,7 @@ def main():
         INSERT INTO customer_name (id,name) VALUES (7, 'Tom');
     """
     sql4 = """
-        INSERT INTO orders(id, customer_id) VALUES (1,1);
+        INSERT INTO orders(id, customer_id) VALUES (2,7);
     """
     sql5 = """
         INSERT INTO customer_name(id, customer_name) VALUES (1,'Alice');
