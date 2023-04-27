@@ -11,7 +11,7 @@ ON
 rela_i_i_1000.key = rela_i_i_100000.key 
 
 WHERE
-rela_i_i_1000.key>5 OR rela_i_i_1000.key!=1000
+rela_i_i_1000.key>25 AND rela_i_i_1000.key!=30
 
 GROUP BY 
 rela_i_i_1000.key 
