@@ -1,0 +1,43 @@
+SELECT * FROM customer_name;
+
+################################################################################   CREATE
+
+CREATE TABLE customer_name (
+id int PRIMARY KEY,
+customer_name str
+);
+
+CREATE TABLE orders (
+id int PRIMARY KEY,
+customer_id int,
+FOREIGN KEY (customer_id) REFERENCES customer_name(id)
+);
+
+################################################################################  DROP
+
+DROP TABLE customer_name;
+DROP TABLE orders;
+
+################################################################################  INSERT
+
+INSERT INTO orders(id, customer_id) VALUES (1,1);
+
+INSERT INTO customer_name(id, customer_name) VALUES (1,'Alice');
+
+INSERT INTO customer_name(id, customer_name) VALUES (5,'Bob');
+
+INSERT INTO customer_name(id, customer_name) VALUES (7,'Tom');
+    
+################################################################################  DELETE
+
+DELETE FROM customer_name WHERE customer_name.id=7 AND customer_name.customer_name='Tom';
+
+DELETE FROM customer_name WHERE customer_name.customer_name='Alice';
+
+DELETE FROM orders WHERE orders.id=1 AND orders.customer_id=1;
+
+DELETE FROM orders WHERE orders.id=1;
+
+################################################################################  UPDATE
+
+UPDATE orders SET customer_id = 7 WHERE id = 1;

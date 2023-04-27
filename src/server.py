@@ -7,6 +7,7 @@ import math
 import dill
 import uuid
 import time
+import pydoc
 import pickle
 import shutil
 import logging
@@ -391,6 +392,9 @@ def judge_row(row_uu, virtual_plan):
         return True
     elif virtual_plan.where_expr2_eval == None:   # use where filter rows
         ans = baseDBDict[where_expr1_rela][row_uu][where_expr1_attr]
+        if metaDict[where_expr1_rela][where_expr1_attr] == 'str':
+            ans = '\''+ans+'\''
+
         tmpEvalS = virtual_plan.where_expr1_eval.replace(virtual_plan.where_expr1_eval[:brkAttrNameIndex1], str(ans))
         if eval(tmpEvalS):
             return True
@@ -636,11 +640,26 @@ def read_sql():
 
 def aggr_row_func(rowList, aggr_func, target_attr):  # row is a list of {'id2salary.id': 909, 'id2salary.salary': 2000}
     logging.debug("rowList is: "+str(rowList))
-    ret = rowList[0][target_attr]
-    for row in rowList:
-        if aggr_func.upper() == "MIN":
-            ret = min(ret, row[target_attr])
-    
+    if aggr_func.upper() == "MIN" or aggr_func.upper() == "MAX":
+        ret = rowList[0][target_attr]
+        for row in rowList:
+            if aggr_func.upper() == "MIN":
+                ret = min(ret, row[target_attr])
+            if aggr_func.upper() == "MAX":
+                ret = max(ret, row[target_attr])
+    elif aggr_func.upper() == "SUM" or aggr_func.upper() == "AVG":
+        ret = 0
+        for row in rowList:
+            ret += row[target_attr]
+        if aggr_func.upper() == "AVG":
+            ret /= len(rowList)
+    elif aggr_func.upper() == "COUNT":
+        return len(rowList)
+    elif aggr_func.upper() == "DISTINCT":
+        st = set()
+        for row in rowList:
+            st.add(row[target_attr])
+        return len(st)
     return ret
 
 def satisfy_condition_optimizer(where_expr1_rela, where_expr1_attr, where_expr2_rela, where_expr2_attr):
@@ -669,7 +688,6 @@ def calc_rows_by_treap(rela, attr, op, val):
 def join_judger(rela1, ans1, ans2, logic, mpAttr, uu1, uu2):
     row_cnt = 0
     if logic == '==' and ans1 == ans2:
-            #print("3: ",time.time() - tmp)
             for relaTMP in mpAttr.keys():
                 for attr in mpAttr[relaTMP]:
                     if relaTMP == rela1:
@@ -679,7 +697,6 @@ def join_judger(rela1, ans1, ans2, logic, mpAttr, uu1, uu2):
             row_cnt += 1
 
     if logic == '>=' and ans1 >= ans2:
-            tmp = time.time()
             for relaTMP in mpAttr.keys():
                 for attr in mpAttr[relaTMP]:
                     if relaTMP == rela1:
@@ -690,7 +707,6 @@ def join_judger(rela1, ans1, ans2, logic, mpAttr, uu1, uu2):
 
     elif logic == '>' and ans1 > ans2:
             #print("3: ",time.time() - tmp)
-            tmp = time.time()
             for relaTMP in mpAttr.keys():
                 for attr in mpAttr[relaTMP]:
                     if relaTMP == rela1:
@@ -701,7 +717,6 @@ def join_judger(rela1, ans1, ans2, logic, mpAttr, uu1, uu2):
 
     elif logic == '<=' and ans1 <= ans2:
             #print("3: ",time.time() - tmp)
-            tmp = time.time()
             for relaTMP in mpAttr.keys():
                 for attr in mpAttr[relaTMP]:
                     if relaTMP == rela1:
@@ -712,7 +727,6 @@ def join_judger(rela1, ans1, ans2, logic, mpAttr, uu1, uu2):
 
     elif logic == '<' and ans1 < ans2:
             #print("3: ",time.time() - tmp)
-            tmp = time.time()
             for relaTMP in mpAttr.keys():
                 for attr in mpAttr[relaTMP]:
                     if relaTMP == rela1:
@@ -723,7 +737,6 @@ def join_judger(rela1, ans1, ans2, logic, mpAttr, uu1, uu2):
     
     elif logic == '!=' and ans1 != ans2:
             #print("3: ",time.time() - tmp)
-            tmp = time.time()
             for relaTMP in mpAttr.keys():
                 for attr in mpAttr[relaTMP]:
                     if relaTMP == rela1:
@@ -906,53 +919,77 @@ def mem_exec(sql):
         rela_list = list(mpAttr.keys())
         rela = rela_list[0]#for rela in mpAttr.keys():  # 就一个或者两个吧？？
         if virtual_plan.join_expr_eval == None: #tested
-            for row_uu in baseDBDict[rela]: #线性扫描，TODO 索引直接拉where后的数据       
-                if virtual_plan.where_expr == None:
-                    for attr in mpAttr[rela]:
-                    #if attr in baseDBDict[rela][row_uu].keys(): 别判断，让他自动炸了，外面有捕获
-                        mpAttr[rela][attr].append(baseDBDict[rela][row_uu][attr])
+            indexEqualFlag = False
+            if virtual_plan.where_expr != None and virtual_plan.where_expr2_eval == None and virtual_plan.where_expr1_eval.index('=='):
+                pos = virtual_plan.where_expr1_eval.index('==')
+                __k = virtual_plan.where_expr1_eval[:pos]
+                #print(__k)
+                __k = __k[__k.index('.')+1:]
+                if rela in BTreeDict.keys() and __k in BTreeDict[rela].keys():
+                    indexEqualFlag = True
+            # index diff
+            if indexEqualFlag:
+                k = virtual_plan.where_expr1_eval[:pos]
+                k = k[k.index('.')+1:]
+                v = eval(virtual_plan.where_expr1_eval[pos+2:])
+                uu_set = BTreeDict[rela][k][v]
+
+                for uu in uu_set:
                     row_cnt += 1
-                elif virtual_plan.where_expr2_eval == None:   # use where filter rows
-                    #if rela == where_expr1_rela: 不用了吧，join分类后
-                    ans = baseDBDict[where_expr1_rela][row_uu][where_expr1_attr]
-                    tmpEvalS = virtual_plan.where_expr1_eval.replace(virtual_plan.where_expr1_eval[:brkAttrNameIndex1], str(ans))
-                    #print(tmpEvalS)
-                    if eval(tmpEvalS):
+                    for attr in mpAttr[rela]:
+                        mpAttr[rela][attr].append(baseDBDict[rela][uu][attr])
+                #print(mpAttr)
+            else:
+                for row_uu in baseDBDict[rela]: #线性扫描，TODO 索引直接拉where后的数据       
+                    if virtual_plan.where_expr == None:
                         for attr in mpAttr[rela]:
+                        #if attr in baseDBDict[rela][row_uu].keys(): 别判断，让他自动炸了，外面有捕获
                             mpAttr[rela][attr].append(baseDBDict[rela][row_uu][attr])
                         row_cnt += 1
-                else:   # double expr && no join
-                    ans1_where_no_join = baseDBDict[where_expr1_rela][row_uu][where_expr1_attr]
-                    if metaDict[where_expr1_rela][where_expr1_attr] == 'str':
-                        ans1_where_no_join = '\''+ans1_where_no_join+'\''
-                    tmpEvalS1 = virtual_plan.where_expr1_eval.replace(virtual_plan.where_expr1_eval[:brkAttrNameIndex1], str(ans1_where_no_join))
-                    if eval(tmpEvalS1):
-                        if virtual_plan.where_logic == 'or':
+                    elif virtual_plan.where_expr2_eval == None:   # use where filter rows
+                        #if rela == where_expr1_rela: 不用了吧，join分类后
+                        ans = baseDBDict[where_expr1_rela][row_uu][where_expr1_attr]
+                        tmpEvalS = virtual_plan.where_expr1_eval.replace(virtual_plan.where_expr1_eval[:brkAttrNameIndex1], str(ans))
+                        #print(tmpEvalS)
+                        if eval(tmpEvalS):
                             for attr in mpAttr[rela]:
                                 mpAttr[rela][attr].append(baseDBDict[rela][row_uu][attr])
-                        else:   # and
-                            ans2_where_no_join = baseDBDict[where_expr2_rela][row_uu][where_expr2_attr]
-                            if metaDict[where_expr2_rela][where_expr2_attr] == 'str':
-                                ans2_where_no_join = '\''+ans2_where_no_join+'\''
-                            tmpEvalS2 = virtual_plan.where_expr2_eval.replace(virtual_plan.where_expr2_eval[:brkAttrNameIndex2], str(ans2_where_no_join))
-                            if eval(tmpEvalS2):
+                            row_cnt += 1
+                    else:   # double expr && no join
+                        ans1_where_no_join = baseDBDict[where_expr1_rela][row_uu][where_expr1_attr]
+                        if metaDict[where_expr1_rela][where_expr1_attr] == 'str':
+                            ans1_where_no_join = '\''+ans1_where_no_join+'\''
+                        tmpEvalS1 = virtual_plan.where_expr1_eval.replace(virtual_plan.where_expr1_eval[:brkAttrNameIndex1], str(ans1_where_no_join))
+                        if eval(tmpEvalS1):
+                            if virtual_plan.where_logic == 'or':
                                 for attr in mpAttr[rela]:
                                     mpAttr[rela][attr].append(baseDBDict[rela][row_uu][attr])
-                    else:   # tmpEvalS1 is False
-                        if virtual_plan.where_logic == 'or':
-                            ans2_where_no_join = baseDBDict[where_expr2_rela][row_uu][where_expr2_attr]
-                            if metaDict[where_expr2_rela][where_expr2_attr] == 'str':
-                                ans2_where_no_join = '\''+ans2_where_no_join+'\''
-                            tmpEvalS2 = virtual_plan.where_expr2_eval.replace(virtual_plan.where_expr2_eval[:brkAttrNameIndex2], str(ans2_where_no_join))
-                            if eval(tmpEvalS2):
-                                for attr in mpAttr[rela]:
-                                    mpAttr[rela][attr].append(baseDBDict[rela][row_uu][attr])
-                    #logging.debug("ok double where without join: "+str(tmpEvalS1)+" "+str(tmpEvalS2))
-                    #if eval(str(eval(tmpEvalS1))+" "+str(virtual_plan.where_logic)+" "+str(eval(tmpEvalS2))):
-                    #if eval(tmpEvalS1+" "+str(virtual_plan.where_logic)+" "+tmpEvalS2):
-                    #    for attr in mpAttr[rela]:
-                    #        mpAttr[rela][attr].append(baseDBDict[rela][row_uu][attr])
-                    #    row_cnt += 1
+                                row_cnt += 1
+                            else:   # and
+                                ans2_where_no_join = baseDBDict[where_expr2_rela][row_uu][where_expr2_attr]
+                                if metaDict[where_expr2_rela][where_expr2_attr] == 'str':
+                                    ans2_where_no_join = '\''+ans2_where_no_join+'\''
+                                tmpEvalS2 = virtual_plan.where_expr2_eval.replace(virtual_plan.where_expr2_eval[:brkAttrNameIndex2], str(ans2_where_no_join))
+                                if eval(tmpEvalS2):
+                                    for attr in mpAttr[rela]:
+                                        mpAttr[rela][attr].append(baseDBDict[rela][row_uu][attr])
+                                    row_cnt += 1
+                        else:   # tmpEvalS1 is False
+                            if virtual_plan.where_logic == 'or':
+                                ans2_where_no_join = baseDBDict[where_expr2_rela][row_uu][where_expr2_attr]
+                                if metaDict[where_expr2_rela][where_expr2_attr] == 'str':
+                                    ans2_where_no_join = '\''+ans2_where_no_join+'\''
+                                tmpEvalS2 = virtual_plan.where_expr2_eval.replace(virtual_plan.where_expr2_eval[:brkAttrNameIndex2], str(ans2_where_no_join))
+                                if eval(tmpEvalS2):
+                                    for attr in mpAttr[rela]:
+                                        mpAttr[rela][attr].append(baseDBDict[rela][row_uu][attr])
+                                    row_cnt += 1
+                        #logging.debug("ok double where without join: "+str(tmpEvalS1)+" "+str(tmpEvalS2))
+                        #if eval(str(eval(tmpEvalS1))+" "+str(virtual_plan.where_logic)+" "+str(eval(tmpEvalS2))):
+                        #if eval(tmpEvalS1+" "+str(virtual_plan.where_logic)+" "+tmpEvalS2):
+                        #    for attr in mpAttr[rela]:
+                        #        mpAttr[rela][attr].append(baseDBDict[rela][row_uu][attr])
+                        #select * from rela_i_i_100000 where rela_i_i_100000.key=1 AND rela_i_i_100000.val=1;
         else:   #join, 叉积新表
             # 1. test row_uu and row_uu2 for where
             # 2. test join_expr
@@ -1099,7 +1136,7 @@ def mem_exec(sql):
                             ans2 = baseDBDict[rela1][uu1][join_attr2]
                             row_cnt += join_judger(rela1, ans1, ans2, logic, mpAttr, uu1, uu2)
 
-        logging.debug("After filling, mpAttr is like: " + str(mpAttr))
+        #logging.debug("After filling, mpAttr is like: " + str(mpAttr))
 
         #print(row_cnt)
 
@@ -1107,7 +1144,8 @@ def mem_exec(sql):
 
         # Fill in ret, zip, one table meant to be aligned, no join
         # ret_list_dict = []
-        for iter in range(row_cnt):
+
+        for iter in tqdm(range(row_cnt)):
             tmpLst = []
             tmpDict = {}
             for tu in virtual_plan.queryAttr:
@@ -1130,17 +1168,22 @@ def mem_exec(sql):
                     com_attr = rela+"."+tu[1]
                     if com_attr not in tmpDict.keys():
                         tmpDict.setdefault(com_attr, now_entry)
-            ret_list.append(tmpLst)
-            ret_list_dict.append(tmpDict)
+            if not virtual_plan.Aggr:
+                ret_list.append(tmpLst)
+                tmpDict.clear()
+            else:
+                ret_list_dict.append(tmpDict)
+                tmpLst.clear()
         
-        logging.debug("ret_list_dict"+str(ret_list_dict))
+        #logging.debug("ret_list_dict"+str(ret_list_dict))
 
         # Time to print results
         print("By linear scaning, query done, result as follows:")
-        colNameForPrint = []
+        colNameForPrint = [] 
         colNameSet = set()  # interesting point, PrettyTable bans duplicate field names
 
         # 重复列trick，进dict不准备沿用了，太难维护
+        # 很快，不用看
         for tu in virtual_plan.queryAttr:
             rela = tu[0]
             if rela == 'special_WHERE':
@@ -1176,8 +1219,9 @@ def mem_exec(sql):
             #|  122   |  Alice   |   122   |   Alice   |
             #+--------+----------+---------+-----------+
             table4Print = PrettyTable(colNameForPrint)
-            for row in ret_list:
+            for row in tqdm(ret_list):
                 table4Print.add_row(row)
+                row.clear()
             if virtual_plan.orderByAttr != None:
                 table4Print.sortby = virtual_plan.orderByAttr
                 table4Print.reversesort = not virtual_plan.orderByAsc
@@ -1188,7 +1232,15 @@ def mem_exec(sql):
                 else:
                     print(table4Print[:virtual_plan.limit])
             else:
-                print(table4Print)
+                if len(ret_list) >= 1000000:
+                    print("The result is too big, use limit next time, here only return 1000000 rows:")
+                    if table4Print.reversesort:
+                        print(table4Print[-1000000:])
+                    else:
+                        print(table4Print[:1000000])
+                    #print(table4Print[:1000000])
+                else:
+                    print(table4Print)
             sys.stdout.flush() # force flushing the output buffer
         # Time to do group by && having
         else:   #这种的，记得列名打全了
@@ -1200,11 +1252,11 @@ def mem_exec(sql):
             #+--------------+-----------------------+
             logging.info("dict ver: " + str(ret_list_dict))
             grpMP = {}
-            for row_uu in baseDBDict[rela]:                    
-                for attr in mpAttr[rela]:
+            #for row_uu in baseDBDict[rela]:                    
+            #    for attr in mpAttr[rela]:
                     #if attr in baseDBDict[rela][row_uu].keys(): 别判断，让他自动炸了，外面有捕获
-                    mpAttr[rela][attr].append(baseDBDict[rela][row_uu][attr])
-                row_cnt += 1    
+            #        mpAttr[rela][attr].append(baseDBDict[rela][row_uu][attr])
+            #    row_cnt += 1    
 
             for rowMP in ret_list_dict:
                 #print("GROUP", row, virtual_plan.group_attr, virtual_plan.having_expr)
@@ -1220,6 +1272,9 @@ def mem_exec(sql):
 
             # Filter by having
             valid_groupAttr_set = set()
+
+            # TODO NO HAVING
+
             #having_expr = virtual_plan.having_expr1_eval
             aggr_func = virtual_plan.having_expr1_eval[:virtual_plan.having_expr1_eval.index('(')] #MIN
             if virtual_plan.having_expr2_eval != None:
@@ -1341,7 +1396,7 @@ def engine():
         # 或者，commit的东西，汇报commit
 
         # start work
-        print("==============================================================================")
+        print("============================================================================================================================================================")
         print("Waiting for your sql, input quit; to exit without cmd+C...")
         print(">",end='')
         sql = read_sql()

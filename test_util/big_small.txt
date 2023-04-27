@@ -13,3 +13,16 @@ rela_i_i_100000.key DESC
 LIMIT
 15
 ;
+
+SELECT
+rela_i_i_1000.key, rela_i_i_1000.val, rela_i_i_100000.key, rela_i_i_100000.val 
+FROM 
+rela_i_i_1000 
+INNER JOIN 
+rela_i_i_100000
+ON
+rela_i_i_1000.key = rela_i_i_100000.key
+ORDER BY 
+rela_i_i_100000.key DESC
+;
+
