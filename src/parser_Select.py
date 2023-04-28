@@ -330,7 +330,7 @@ def main():
     # commit 7250162
     sql13 = """
         SELECT 
-        customer_name.id, MIN(customer_name.customer_name), MIN(orders.id), MIN(orders.customer_id) 
+        customer_name.id, MIN(customer_name.customer_name), SUM(orders.id), MIN(orders.customer_id) 
         FROM 
         customer_name 
         INNER JOIN 
