@@ -1225,6 +1225,8 @@ def mem_exec(sql):
             if virtual_plan.orderByAttr != None:
                 table4Print.sortby = virtual_plan.orderByAttr
                 table4Print.reversesort = not virtual_plan.orderByAsc
+            
+            st = time.time()
             if virtual_plan.limit != None:
                 #if len(table4Print.rows) > virtual_plan.limit:
                 if table4Print.reversesort:
@@ -1242,6 +1244,7 @@ def mem_exec(sql):
                 else:
                     print(table4Print)
             sys.stdout.flush() # force flushing the output buffer
+            print("stdout flush consumes ", time.time()-st)
         # Time to do group by && having
         else:   #这种的，记得列名打全了
             #+--------------+-----------------------+
@@ -1330,6 +1333,7 @@ def mem_exec(sql):
             if virtual_plan.orderByAttr != None:
                 table.sortby = virtual_plan.orderByAttr
                 table.reversesort = not virtual_plan.orderByAsc
+            st = time.time()
             if virtual_plan.limit != None:
                 #if len(table4Print.rows) > virtual_plan.limit:
                 if table.reversesort:
@@ -1339,6 +1343,7 @@ def mem_exec(sql):
             else:
                 print(table)    
             sys.stdout.flush()
+            print("stdout flush consumes ", time.time()-st)
         #else:   #has aggr
         #    pass
 

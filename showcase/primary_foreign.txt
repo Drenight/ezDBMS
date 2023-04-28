@@ -34,6 +34,8 @@ DELETE FROM customer_name WHERE customer_name.id=7 AND customer_name.customer_na
 
 DELETE FROM customer_name WHERE customer_name.customer_name='Alice';
 
+DELETE FROM customer_name WHERE customer_name.id=1;
+
 DELETE FROM orders WHERE orders.id=1 AND orders.customer_id=1;
 
 DELETE FROM orders WHERE orders.id=1;
