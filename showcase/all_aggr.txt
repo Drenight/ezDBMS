@@ -13,3 +13,19 @@ rela_i_1_100000.val
 HAVING
 DISTINCT(rela_i_i_100000.val) != 1
 ;
+
+
+
+SELECT
+SUM(rela_i_1_100000.key), rela_i_1_100000.val, AVG(rela_i_i_100000.key), DISTINCT(rela_i_i_100000.val)
+FROM 
+rela_i_1_100000 
+INNER JOIN 
+rela_i_i_100000
+ON
+rela_i_1_100000.key = rela_i_i_100000.key
+WHERE
+rela_i_1_100000.key>1 OR rela_i_i_100000.key>=1
+GROUP BY
+rela_i_1_100000.val
+;
