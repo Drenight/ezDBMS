@@ -1275,36 +1275,40 @@ def mem_exec(sql):
 
             # TODO NO HAVING
 
-            #having_expr = virtual_plan.having_expr1_eval
-            aggr_func = virtual_plan.having_expr1_eval[:virtual_plan.having_expr1_eval.index('(')] #MIN
-            if virtual_plan.having_expr2_eval != None:
-                aggr_func2 = virtual_plan.having_expr2_eval[:virtual_plan.having_expr2_eval.index('(')] #MIN
-        
-            target_attr = virtual_plan.having_expr1_eval[virtual_plan.having_expr1_eval.index('(')+1 : virtual_plan.having_expr1_eval.index(')')]
-            if virtual_plan.having_expr2_eval != None:
-                target_attr2 = virtual_plan.having_expr2_eval[virtual_plan.having_expr2_eval.index('(')+1 : virtual_plan.having_expr2_eval.index(')')]
+            if virtual_plan.having_expr1_eval == None:
+                for aggr_attr_value in grpMP.keys():
+                    valid_groupAttr_set.add(aggr_attr_value)
+            else:
+                #having_expr = virtual_plan.having_expr1_eval
+                aggr_func = virtual_plan.having_expr1_eval[:virtual_plan.having_expr1_eval.index('(')] #MIN
+                if virtual_plan.having_expr2_eval != None:
+                    aggr_func2 = virtual_plan.having_expr2_eval[:virtual_plan.having_expr2_eval.index('(')] #MIN
             
-            logging.debug("aggr1"+str(aggr_func)+" "+str(target_attr))
-            if virtual_plan.having_expr2_eval != None:
-                logging.debug("aggr2"+str(aggr_func2)+" "+str(target_attr2))
-                logging.debug("having logic is "+str(virtual_plan.having_logic))
+                target_attr = virtual_plan.having_expr1_eval[virtual_plan.having_expr1_eval.index('(')+1 : virtual_plan.having_expr1_eval.index(')')]
+                if virtual_plan.having_expr2_eval != None:
+                    target_attr2 = virtual_plan.having_expr2_eval[virtual_plan.having_expr2_eval.index('(')+1 : virtual_plan.having_expr2_eval.index(')')]
+                
+                logging.debug("aggr1"+str(aggr_func)+" "+str(target_attr))
+                if virtual_plan.having_expr2_eval != None:
+                    logging.debug("aggr2"+str(aggr_func2)+" "+str(target_attr2))
+                    logging.debug("having logic is "+str(virtual_plan.having_logic))
 
-            for aggr_attr_value in grpMP.keys():
-                #for rowMP in grpMP[aggr_attr_value]:
-                ans = aggr_row_func(grpMP[aggr_attr_value], aggr_func, target_attr)
-                tmpEvalS = virtual_plan.having_expr1_eval.replace(virtual_plan.having_expr1_eval[:virtual_plan.having_expr1_eval.index(')')+1], str(ans))
-                #print(tmpEvalS)
-                if virtual_plan.having_expr2_eval == None:
-                    if eval(tmpEvalS):  # 天才？！这是不是就是SQL注入啊？
-                        valid_groupAttr_set.add(aggr_attr_value)
-                else:
-                    ans2 = aggr_row_func(grpMP[aggr_attr_value], aggr_func2, target_attr2)
-                    tmpEvalS2 = virtual_plan.having_expr2_eval.replace(virtual_plan.having_expr2_eval[:virtual_plan.having_expr2_eval.index(')')+1], str(ans2))
-                    logging.debug("conditions: "+ str(tmpEvalS) +" "+str(virtual_plan.having_logic) +" "+str(tmpEvalS2))
-                    
-                    # having上不了条件优化了，用的treap
-                    if eval(str(eval(tmpEvalS))+" "+virtual_plan.having_logic+" "+str(eval(tmpEvalS2))):
-                        valid_groupAttr_set.add(aggr_attr_value)
+                for aggr_attr_value in grpMP.keys():
+                    #for rowMP in grpMP[aggr_attr_value]:
+                    ans = aggr_row_func(grpMP[aggr_attr_value], aggr_func, target_attr)
+                    tmpEvalS = virtual_plan.having_expr1_eval.replace(virtual_plan.having_expr1_eval[:virtual_plan.having_expr1_eval.index(')')+1], str(ans))
+                    #print(tmpEvalS)
+                    if virtual_plan.having_expr2_eval == None:
+                        if eval(tmpEvalS):  # 天才？！这是不是就是SQL注入啊？
+                            valid_groupAttr_set.add(aggr_attr_value)
+                    else:
+                        ans2 = aggr_row_func(grpMP[aggr_attr_value], aggr_func2, target_attr2)
+                        tmpEvalS2 = virtual_plan.having_expr2_eval.replace(virtual_plan.having_expr2_eval[:virtual_plan.having_expr2_eval.index(')')+1], str(ans2))
+                        logging.debug("conditions: "+ str(tmpEvalS) +" "+str(virtual_plan.having_logic) +" "+str(tmpEvalS2))
+                        
+                        # having上不了条件优化了，用的treap
+                        if eval(str(eval(tmpEvalS))+" "+virtual_plan.having_logic+" "+str(eval(tmpEvalS2))):
+                            valid_groupAttr_set.add(aggr_attr_value)
 
                 #final_list.append(grpMP)
             logging.debug("valid_groupAttr_set is: " + str(valid_groupAttr_set))

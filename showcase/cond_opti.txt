@@ -3,4 +3,4 @@ SELECT
 FROM 
 rela_i_i_100000
 WHERE 
-rela_i_i_100000.key!=1 AND rela_i_i_100000.key<10;
+rela_i_i_100000.key!=1 AND rela_i_i_100000.key=10;
