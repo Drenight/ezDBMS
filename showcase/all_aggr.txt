@@ -1,5 +1,5 @@
 SELECT
-SUM(rela_i_1_100000.key), rela_i_1_100000.val, AVG(rela_i_i_100000.key), DISTINCT(rela_i_i_100000.val)
+COUNT(rela_i_1_100000.key), rela_i_1_100000.val, MIN(rela_i_i_100000.key), MAX(rela_i_i_100000.val)
 FROM 
 rela_i_1_100000 
 INNER JOIN 
