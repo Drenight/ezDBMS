@@ -17,10 +17,10 @@ GROUP BY
 rela_i_i_1000.key 
 
 HAVING 
-MIN(rela_i_i_1000.val)>=20 OR AVG(rela_i_i_100000.val)>550
+MIN(rela_i_i_1000.val)>=27 OR AVG(rela_i_i_100000.val)>550
 
 ORDER BY 
 rela_i_i_1000.key ASC
 
 LIMIT 
-100;
+10;
