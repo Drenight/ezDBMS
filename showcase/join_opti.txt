@@ -27,6 +27,7 @@ ON
 rela_i_1_100000.key = rela_i_i_100000.key
 WHERE
 rela_i_1_100000.key>1 AND rela_i_i_100000.key>=1;
+LIMIT 1;
 
 
 SELECT
