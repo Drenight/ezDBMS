@@ -1245,6 +1245,7 @@ def mem_exec(sql):
                     print(table4Print)
             sys.stdout.flush() # force flushing the output buffer
             print("stdout flush consumes ", time.time()-st)
+            print(virtual_plan.limit)
         # Time to do group by && having
         else:   #这种的，记得列名打全了
             #+--------------+-----------------------+

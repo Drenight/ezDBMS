@@ -266,6 +266,9 @@ class SelectListener(SQLiteParserListener):
             self.plan.limit = eval(limitCtx.expr()[0].getText())
 
         return super().enterSelect_stmt(ctx)
+    
+    def enterLimit_stmt(self, ctx: SQLiteParser.Limit_stmtContext):
+        return super().enterLimit_stmt(ctx)
 
     def enterOrder_by_stmt(self, ctx: SQLiteParser.Order_by_stmtContext):
         return super().enterOrder_by_stmt(ctx)
@@ -357,7 +360,26 @@ def main():
         SELECT * FROM rela_i_i_100000 ORDER BY rela_i_i_100000.key DESC LIMIT 15;
     """
 
-    input_stream = InputStream(sql15)
+    sql16 = """
+        SELECT
+        rela_i_1_100000.key, rela_i_1_100000.val, rela_i_i_100000.key, rela_i_i_100000.val 
+        FROM 
+        rela_i_1_100000 
+        INNER JOIN 
+        rela_i_i_100000
+        ON
+        rela_i_1_100000.key = rela_i_i_100000.key
+        WHERE
+        rela_i_1_100000.key>1 AND rela_i_i_100000.key>=1;
+        ORDER BY
+        rela_i_1_100000.key
+        DESC
+        LIMIT 
+        12
+        ;
+    """
+
+    input_stream = InputStream(sql16)
     lexer = SQLiteLexer(input_stream)
     token_stream = CommonTokenStream(lexer)
     parser = SQLiteParser(token_stream)
